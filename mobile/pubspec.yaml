@@ -1,0 +1,48 @@
+name: cybersas
+description: "CyberSas : le client Android du réseau privé CyberSas."
+publish_to: 'none'
+
+# Incrémenter à chaque APK envoyé : Android refuse une mise à jour dont
+# le numéro n'augmente pas.
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Le QR de l'invitation, dessiné sur place : rien ne part sur Internet.
+  qr_flutter: ^4.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/icon/
+  # Polices embarquées : l'appli n'en télécharge aucune. Ce sont des polices
+  # variables, la graisse se choisit avec FontVariation('wght', …).
+  fonts:
+    - family: Syne
+      fonts:
+        - asset: assets/polices/Syne.ttf
+    - family: SpaceGrotesk
+      fonts:
+        - asset: assets/polices/SpaceGrotesk.ttf
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/polices/JetBrainsMono.ttf
+
+# L'icône : le logo pris à l'intérieur de son badge, sans contour. C'est le
+# système qui arrondit.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/icon/icon.png
+  min_sdk_android: 21

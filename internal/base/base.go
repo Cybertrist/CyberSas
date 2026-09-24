@@ -1,5 +1,5 @@
-// Package base garde les appareils inscrits et les clés d'inscription des
-// machines, dans un fichier SQLite.
+// Package base garde les appareils inscrits, les clés d'inscription des
+// machines et les comptes Google, dans un fichier SQLite.
 //
 // Rien de secret n'y est stocké en clair : les jetons de l'API et les clés
 // d'inscription n'y figurent que par leur empreinte SHA-256, et les clés
@@ -22,7 +22,15 @@ import (
 var (
 	ErrIntrouvable       = errors.New("introuvable")
 	ErrAutreProprietaire = errors.New("cette clé est déjà inscrite pour quelqu'un d'autre")
+	ErrNomPris           = errors.New("ce nom de machine est déjà pris")
+	ErrAutreCompte       = errors.New("cette adresse est liée à un autre compte Google")
+	ErrReseauPlein       = errors.New("plus aucune adresse libre dans le réseau")
 )
+
+// NomsReserves : jamais donnés à un appareil. « serveur » désigne le
+// serveur dans le DNS du VPN ; le laisser prendre, c'est détourner vers soi
+// ce que les autres lui envoient.
+var NomsReserves = map[string]bool{"serveur": true, "vpn": true, "auth": true}
 
 type Base struct {
 	db *sql.DB
@@ -38,60 +46,61 @@ type Appareil struct {
 	Systeme      string
 	Cree, Vu     time.Time
 	Expire       time.Time // zéro : n'expire pas
-	Signature    []byte    // du verrou, sur la clé et l'adresse ; vide sans verrou
+	// Certificat du verrou : signature, et les champs signés qui ne sont
+	// pas déjà ci-dessus.
+	Signature       []byte
+	SignatureGroupe string
+	SignatureExpire time.Time
 }
 
+// AUTOINCREMENT : un numéro d'appareil n'est jamais redonné. Un pair qui
+// n'a pas encore rafraîchi sa liste ne confond donc pas un nouvel appareil
+// avec l'ancien.
 const schema = `
 CREATE TABLE IF NOT EXISTS appareils (
-	id           INTEGER PRIMARY KEY,
-	nom          TEXT NOT NULL UNIQUE,
-	cle_publique TEXT NOT NULL UNIQUE,
-	adresse      TEXT NOT NULL UNIQUE,
-	proprietaire TEXT NOT NULL DEFAULT '',
-	etiquette    TEXT NOT NULL DEFAULT '',
-	systeme      TEXT NOT NULL DEFAULT '',
-	cree         INTEGER NOT NULL,
-	vu           INTEGER NOT NULL,
-	expire       INTEGER NOT NULL DEFAULT 0,
-	jeton        BLOB,
-	signature    BLOB
+	id               INTEGER PRIMARY KEY AUTOINCREMENT,
+	nom              TEXT NOT NULL UNIQUE,
+	cle_publique     TEXT NOT NULL UNIQUE,
+	adresse          TEXT NOT NULL UNIQUE,
+	proprietaire     TEXT NOT NULL DEFAULT '',
+	etiquette        TEXT NOT NULL DEFAULT '',
+	systeme          TEXT NOT NULL DEFAULT '',
+	cree             INTEGER NOT NULL,
+	vu               INTEGER NOT NULL,
+	expire           INTEGER NOT NULL DEFAULT 0,
+	jeton            BLOB,
+	signature        BLOB,
+	signature_groupe TEXT NOT NULL DEFAULT '',
+	signature_expire INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS cles (
 	empreinte   BLOB PRIMARY KEY,
 	etiquette   TEXT NOT NULL DEFAULT '',
 	utilisateur TEXT NOT NULL DEFAULT '',
+	nom         TEXT NOT NULL DEFAULT '',
 	expire      INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS comptes (
+	email TEXT PRIMARY KEY,
+	sub   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reglages (
+	cle    TEXT PRIMARY KEY,
+	valeur TEXT NOT NULL
 );`
 
+// _txlock=immediate : une transaction prend le verrou d'écriture dès son
+// début. Deux inscriptions simultanées ne choisissent donc jamais la même
+// adresse.
 func Ouvrir(chemin string) (*Base, error) {
-	db, err := sql.Open("sqlite", "file:"+chemin+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	db, err := sql.Open("sqlite", "file:"+chemin+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("schéma : %w", err)
 	}
-	// Une base créée avant le verrou n'a pas la colonne : on l'ajoute.
-	if _, err := db.Exec(`ALTER TABLE appareils ADD COLUMN signature BLOB`); err != nil &&
-		!strings.Contains(err.Error(), "duplicate column") {
-		return nil, fmt.Errorf("migration : %w", err)
-	}
 	return &Base{db: db}, nil
-}
-
-// DefinirSignature enregistre la signature du verrou pour un appareil.
-// Elle n'est valable que pour cette clé et cette adresse : l'appelant l'a
-// vérifiée avant.
-func (b *Base) DefinirSignature(clePublique string, adresse netip.Addr, signature []byte) error {
-	r, err := b.db.Exec(`UPDATE appareils SET signature = ? WHERE cle_publique = ? AND adresse = ?`,
-		signature, clePublique, adresse.String())
-	if err != nil {
-		return err
-	}
-	if n, _ := r.RowsAffected(); n == 0 {
-		return ErrIntrouvable
-	}
-	return nil
 }
 
 func Empreinte(s string) []byte {
@@ -99,13 +108,15 @@ func Empreinte(s string) []byte {
 	return h[:]
 }
 
-const colonnes = `id, nom, cle_publique, adresse, proprietaire, etiquette, systeme, cree, vu, expire, signature`
+const colonnes = `id, nom, cle_publique, adresse, proprietaire, etiquette, systeme, cree, vu, expire,
+	signature, signature_groupe, signature_expire`
 
 func lire(r interface{ Scan(...any) error }) (Appareil, error) {
 	var a Appareil
 	var adresse string
-	var cree, vu, expire int64
-	if err := r.Scan(&a.ID, &a.Nom, &a.ClePublique, &adresse, &a.Proprietaire, &a.Etiquette, &a.Systeme, &cree, &vu, &expire, &a.Signature); err != nil {
+	var cree, vu, expire, sigExpire int64
+	if err := r.Scan(&a.ID, &a.Nom, &a.ClePublique, &adresse, &a.Proprietaire, &a.Etiquette, &a.Systeme,
+		&cree, &vu, &expire, &a.Signature, &a.SignatureGroupe, &sigExpire); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return a, ErrIntrouvable
 		}
@@ -115,6 +126,9 @@ func lire(r interface{ Scan(...any) error }) (Appareil, error) {
 	a.Cree, a.Vu = time.Unix(cree, 0), time.Unix(vu, 0)
 	if expire != 0 {
 		a.Expire = time.Unix(expire, 0)
+	}
+	if sigExpire != 0 {
+		a.SignatureExpire = time.Unix(sigExpire, 0)
 	}
 	return a, nil
 }
@@ -162,8 +176,8 @@ var horsNom = regexp.MustCompile(`[^a-z0-9-]+`)
 func NomPropre(s string) string {
 	s = horsNom.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "-")
 	s = strings.Trim(s, "-")
-	if len(s) > 40 {
-		s = strings.Trim(s[:40], "-")
+	if len(s) > 30 {
+		s = strings.Trim(s[:30], "-")
 	}
 	if s == "" {
 		s = "appareil"
@@ -171,16 +185,62 @@ func NomPropre(s string) string {
 	return s
 }
 
+// NomPersonnel : le nom d'un appareil personnel porte toujours celui de
+// son propriétaire. « portable-alice » ne peut pas se faire passer pour
+// « maison » ni pour « serveur » : les noms des machines, eux, n'ont pas
+// de suffixe, et ce sont les admins qui les choisissent.
+func NomPersonnel(nom, email string) string {
+	local, _, _ := strings.Cut(email, "@")
+	return NomPropre(nom) + "-" + NomPropre(local)
+}
+
+// Inscription : ce que le serveur a vérifié avant d'inscrire.
+type Inscription struct {
+	Appareil Appareil
+	Jeton    string
+	// CleInscription, si non vide, est consommée dans la même transaction :
+	// si l'inscription échoue, la clé reste valable.
+	CleInscription string
+	// Accepter est appelé avec l'étiquette et l'utilisateur de la clé, avant
+	// toute écriture : c'est là que le serveur vérifie l'équipe.
+	Accepter func(etiquette, utilisateur string) error
+	// DureePersonnel : un appareil personnel, qu'il vienne d'un jeton Google
+	// ou d'une clé, expire au bout de ce délai et doit se réinscrire.
+	DureePersonnel time.Duration
+}
+
 // Enregistrer inscrit un appareil, ou met à jour celui qui a déjà cette clé
-// publique : il garde son adresse. Un nouvel appareil reçoit la première
-// adresse libre du réseau, et un nom unique.
-func (b *Base) Enregistrer(a Appareil, jeton string, reseau netip.Prefix, serveur netip.Addr) (Appareil, error) {
+// publique : il garde son adresse. Un nouvel appareil reçoit une adresse
+// libre du réseau, et un nom unique.
+func (b *Base) Enregistrer(ins Inscription, reseau netip.Prefix, serveur netip.Addr) (Appareil, error) {
+	a := ins.Appareil
 	tx, err := b.db.Begin()
 	if err != nil {
 		return a, err
 	}
 	defer tx.Rollback()
-	now := time.Now().Unix()
+	now := time.Now()
+
+	nomMachine := ""
+	if ins.CleInscription != "" {
+		var expire int64
+		err := tx.QueryRow(`DELETE FROM cles WHERE empreinte = ? RETURNING etiquette, utilisateur, nom, expire`,
+			Empreinte(ins.CleInscription)).Scan(&a.Etiquette, &a.Proprietaire, &nomMachine, &expire)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && now.Unix() > expire) {
+			return a, ErrIntrouvable
+		}
+		if err != nil {
+			return a, err
+		}
+	}
+	if ins.Accepter != nil {
+		if err := ins.Accepter(a.Etiquette, a.Proprietaire); err != nil {
+			return a, err
+		}
+	}
+	if a.Proprietaire != "" && ins.DureePersonnel > 0 {
+		a.Expire = now.Add(ins.DureePersonnel)
+	}
 	var expire int64
 	if !a.Expire.IsZero() {
 		expire = a.Expire.Unix()
@@ -195,34 +255,76 @@ func (b *Base) Enregistrer(a Appareil, jeton string, reseau netip.Prefix, serveu
 		if existant.Proprietaire != a.Proprietaire || existant.Etiquette != a.Etiquette {
 			return a, ErrAutreProprietaire
 		}
-		a.ID, a.Adresse, a.Cree, a.Nom, a.Signature = existant.ID, existant.Adresse, existant.Cree, existant.Nom, existant.Signature
-		_, err = tx.Exec(`UPDATE appareils SET systeme=?, vu=?, expire=?, jeton=? WHERE id=?`,
-			a.Systeme, now, expire, Empreinte(jeton), a.ID)
-		if err != nil {
+		a.ID, a.Adresse, a.Cree, a.Nom = existant.ID, existant.Adresse, existant.Cree, existant.Nom
+		a.Signature, a.SignatureGroupe, a.SignatureExpire = existant.Signature, existant.SignatureGroupe, existant.SignatureExpire
+		if _, err := tx.Exec(`UPDATE appareils SET systeme=?, vu=?, expire=?, jeton=? WHERE id=?`,
+			a.Systeme, now.Unix(), expire, Empreinte(ins.Jeton), a.ID); err != nil {
 			return a, err
 		}
 	case errors.Is(err, ErrIntrouvable):
 		if a.Adresse, err = adresseLibre(tx, reseau, serveur); err != nil {
 			return a, err
 		}
-		if a.Nom, err = nomLibre(tx, NomPropre(a.Nom)); err != nil {
+		if a.Nom, err = choisirNom(tx, a, nomMachine); err != nil {
 			return a, err
 		}
 		r, err := tx.Exec(`INSERT INTO appareils (nom, cle_publique, adresse, proprietaire, etiquette, systeme, cree, vu, expire, jeton)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			a.Nom, a.ClePublique, a.Adresse.String(), a.Proprietaire, a.Etiquette, a.Systeme, now, now, expire, Empreinte(jeton))
+			a.Nom, a.ClePublique, a.Adresse.String(), a.Proprietaire, a.Etiquette, a.Systeme, now.Unix(), now.Unix(), expire, Empreinte(ins.Jeton))
 		if err != nil {
 			return a, err
 		}
 		a.ID, _ = r.LastInsertId()
-		a.Cree = time.Unix(now, 0)
+		a.Cree = now
 	default:
 		return a, err
 	}
-	a.Vu = time.Unix(now, 0)
+	a.Vu = now
 	return a, tx.Commit()
 }
 
+// choisirNom : une machine prend le nom que l'admin a mis dans sa clé
+// d'inscription, ou à défaut son étiquette, et le refuse s'il est pris.
+// Un appareil personnel prend le nom qu'il propose, suffixé du nom de son
+// propriétaire, puis numéroté s'il le faut.
+func choisirNom(tx *sql.Tx, a Appareil, nomMachine string) (string, error) {
+	pris := func(n string) (bool, error) {
+		var c int
+		err := tx.QueryRow(`SELECT COUNT(*) FROM appareils WHERE nom = ?`, n).Scan(&c)
+		return c > 0 || NomsReserves[n], err
+	}
+	if a.Etiquette != "" {
+		nom := NomPropre(nomMachine)
+		if nomMachine == "" {
+			nom = NomPropre(a.Etiquette)
+		}
+		p, err := pris(nom)
+		if err != nil {
+			return "", err
+		}
+		if p {
+			return "", ErrNomPris
+		}
+		return nom, nil
+	}
+	base := NomPersonnel(a.Nom, a.Proprietaire)
+	candidat := base
+	for i := 2; ; i++ {
+		p, err := pris(candidat)
+		if err != nil {
+			return "", err
+		}
+		if !p {
+			return candidat, nil
+		}
+		candidat = fmt.Sprintf("%s-%d", base, i)
+	}
+}
+
+// adresseLibre : en tourniquet, à partir de la dernière donnée. Une adresse
+// libérée n'est redonnée qu'après avoir fait le tour du réseau : un pair
+// qui n'a pas encore rafraîchi ses règles ne les applique pas au nouvel
+// appareil qui l'aurait reprise tout de suite.
 func adresseLibre(tx *sql.Tx, reseau netip.Prefix, serveur netip.Addr) (netip.Addr, error) {
 	prises := map[string]bool{serveur.String(): true}
 	rows, err := tx.Query(`SELECT adresse FROM appareils`)
@@ -235,48 +337,75 @@ func adresseLibre(tx *sql.Tx, reseau netip.Prefix, serveur netip.Addr) (netip.Ad
 		prises[s] = true
 	}
 	rows.Close()
-	// On saute l'adresse du réseau lui-même, et on s'arrête avant la
-	// diffusion.
-	for a := reseau.Masked().Addr().Next(); reseau.Contains(a.Next()); a = a.Next() {
+	var derniere string
+	tx.QueryRow(`SELECT valeur FROM reglages WHERE cle = 'derniere_adresse'`).Scan(&derniere)
+	depart, err := netip.ParseAddr(derniere)
+	if err != nil || !reseau.Contains(depart) {
+		depart = reseau.Masked().Addr()
+	}
+	premiere := reseau.Masked().Addr().Next()
+	a := depart
+	for range 1 << (32 - reseau.Bits()) {
+		a = a.Next()
+		// On saute l'adresse du réseau lui-même, et celle de diffusion.
+		if !reseau.Contains(a) || !reseau.Contains(a.Next()) {
+			a = premiere
+		}
 		if !prises[a.String()] {
-			return a, nil
+			_, err := tx.Exec(`INSERT INTO reglages (cle, valeur) VALUES ('derniere_adresse', ?)
+				ON CONFLICT(cle) DO UPDATE SET valeur = excluded.valeur`, a.String())
+			return a, err
 		}
 	}
-	return netip.Addr{}, errors.New("plus aucune adresse libre dans le réseau")
+	return netip.Addr{}, ErrReseauPlein
 }
 
-func nomLibre(tx *sql.Tx, nom string) (string, error) {
-	candidat := nom
-	for i := 2; ; i++ {
-		var n int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM appareils WHERE nom = ?`, candidat).Scan(&n); err != nil {
-			return "", err
-		}
-		if n == 0 {
-			return candidat, nil
-		}
-		candidat = fmt.Sprintf("%s-%d", nom, i)
-	}
-}
-
-// CreerCle enregistre une clé d'inscription à usage unique.
-func (b *Base) CreerCle(cle, etiquette, utilisateur string, expire time.Time) error {
-	_, err := b.db.Exec(`INSERT INTO cles (empreinte, etiquette, utilisateur, expire) VALUES (?, ?, ?, ?)`,
-		Empreinte(cle), etiquette, strings.ToLower(utilisateur), expire.Unix())
+// CreerCle enregistre une clé d'inscription à usage unique. Pour une
+// machine, nom est le nom qu'elle portera dans le VPN.
+func (b *Base) CreerCle(cle, etiquette, utilisateur, nom string, expire time.Time) error {
+	_, err := b.db.Exec(`INSERT INTO cles (empreinte, etiquette, utilisateur, nom, expire) VALUES (?, ?, ?, ?, ?)`,
+		Empreinte(cle), etiquette, strings.ToLower(utilisateur), nom, expire.Unix())
 	return err
 }
 
-// UtiliserCle consomme une clé : elle ne servira qu'une fois, même si deux
-// appareils la présentent au même instant.
-func (b *Base) UtiliserCle(cle string) (etiquette, utilisateur string, err error) {
-	var expire int64
-	err = b.db.QueryRow(`DELETE FROM cles WHERE empreinte = ? RETURNING etiquette, utilisateur, expire`, Empreinte(cle)).
-		Scan(&etiquette, &utilisateur, &expire)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", ErrIntrouvable
+// DefinirCertificat enregistre la signature du verrou pour un appareil,
+// avec les champs signés qui ne sont pas déjà dans sa fiche. L'appelant l'a
+// vérifiée avant.
+func (b *Base) DefinirCertificat(clePublique string, adresse netip.Addr, signature []byte, groupe string, expire time.Time) error {
+	r, err := b.db.Exec(`UPDATE appareils SET signature = ?, signature_groupe = ?, signature_expire = ?
+		WHERE cle_publique = ? AND adresse = ?`,
+		signature, groupe, expire.Unix(), clePublique, adresse.String())
+	if err != nil {
+		return err
 	}
-	if err == nil && time.Now().Unix() > expire {
-		return "", "", ErrIntrouvable
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrIntrouvable
 	}
-	return
+	return nil
+}
+
+// LierCompte fixe, à la première inscription d'une adresse Google,
+// l'identifiant permanent du compte (sub). Ensuite, seul ce compte-là peut
+// se servir de cette adresse : une adresse recyclée par Google, ou
+// réattribuée dans une organisation, n'ouvre pas l'accès de l'ancien
+// titulaire.
+func (b *Base) LierCompte(email, sub string) error {
+	_, err := b.db.Exec(`INSERT INTO comptes (email, sub) VALUES (?, ?) ON CONFLICT(email) DO NOTHING`, email, sub)
+	if err != nil {
+		return err
+	}
+	var connu string
+	if err := b.db.QueryRow(`SELECT sub FROM comptes WHERE email = ?`, email).Scan(&connu); err != nil {
+		return err
+	}
+	if connu != sub {
+		return ErrAutreCompte
+	}
+	return nil
+}
+
+// OublierCompte : l'admin retire quelqu'un de l'équipe pour de bon.
+func (b *Base) OublierCompte(email string) error {
+	_, err := b.db.Exec(`DELETE FROM comptes WHERE email = ?`, email)
+	return err
 }

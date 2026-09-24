@@ -1,8 +1,9 @@
 {
+  "version": 1,
   "regles": [
     {"de": ["groupe:admins"], "vers": ["*", "serveur"], "ports": ["*"]},
     {"de": ["*"], "vers": ["soi"], "ports": ["*"]},
     {"de": ["groupe:equipe"], "vers": ["etiquette:maison"], "ports": ["tcp:80", "tcp:443", "icmp"]},
-    {"de": ["serveur"], "vers": ["etiquette:maison"], "ports": ["tcp:80", "tcp:443"]}
+    {"de": ["serveur"], "vers": ["etiquette:maison"], "ports": ["tcp:8081"]}
   ]
 }

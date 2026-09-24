@@ -23,7 +23,7 @@ import (
 //
 // Les deux derniers commencent fermés, laissent passer les réponses aux
 // connexions déjà ouvertes, puis n'autorisent que ce que la politique dit.
-func Nft(flux []Flux, iface string, serveur netip.Addr) string {
+func Nft(flux []Flux, iface string, serveur netip.Addr, reseau netip.Prefix) string {
 	var sortie, entree []string
 	for _, f := range flux {
 		src, dst := sansServeur(f.Sources, serveur), sansServeur(f.Dest, serveur)
@@ -51,6 +51,12 @@ func Nft(flux []Flux, iface string, serveur netip.Addr) string {
 			fmt.Sprintf("ip daddr %s tcp dport 53 accept", serveur),
 			fmt.Sprintf("ip daddr %s icmp type echo-request accept", serveur),
 		}, entree...))
+	// Les adresses du VPN ne se joignent que par l'interface du VPN (ou de
+	// l'intérieur du serveur lui-même). Un paquet pour 10.77.0.1 arrivé par
+	// un autre chemin, un pont Docker par exemple, est jeté.
+	fmt.Fprintf(&b, "\tchain hors_vpn {\n\t\ttype filter hook input priority filter - 1; policy accept;\n"+
+		"\t\tip daddr %s iifname != { \"%s\", \"lo\" } counter drop comment \"le VPN ne se joint que par le VPN\"\n\t}\n",
+		reseau.Masked(), iface)
 	b.WriteString("}\n")
 	return b.String()
 }

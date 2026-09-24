@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Cybertrist/CyberSas/internal/base"
 	"github.com/Cybertrist/CyberSas/internal/politique"
@@ -64,6 +65,22 @@ func clePubliqueValide(b []byte) bool {
 	return err == nil
 }
 
+// texteCourt : ce qu'un appareil dit de lui-même (nom, système) finit
+// affiché chez les autres. Caractères imprimables seulement, et court :
+// pas de séquence de terminal, pas de roman.
+func texteCourt(s string, max int) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) {
+			return r
+		}
+		return -1
+	}, s)
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max])
+	}
+	return strings.TrimSpace(s)
+}
+
 // ip : Nginx a remplacé X-Real-IP par l'adresse qu'il a vue.
 func ip(r *http.Request) string {
 	if v := r.Header.Get("X-Real-IP"); v != "" {
@@ -71,6 +88,8 @@ func ip(r *http.Request) string {
 	}
 	return r.RemoteAddr
 }
+
+var errHorsEquipe = errors.New("cet utilisateur n'a pas accès à ce réseau")
 
 func (s *Serveur) connexion(w http.ResponseWriter, r *http.Request) {
 	var d protocole.DemandeConnexion
@@ -83,22 +102,30 @@ func (s *Serveur) connexion(w http.ResponseWriter, r *http.Request) {
 		refuser(w, http.StatusBadRequest, "clé publique invalide")
 		return
 	}
-	journal := s.journal.With("evenement", "connexion", "ip", ip(r), "appareil", d.Nom)
+	journal := s.journal.With("evenement", "connexion", "ip", ip(r), "appareil", texteCourt(d.Nom, 30))
 	// D'abord la preuve de possession : elle ne coûte rien, et sans elle on
-	// ne consomme ni jeton Google ni clé d'inscription.
-	if !protocole.VerifierPreuve(s.prive, cle, d.Horodatage, d.Preuve, time.Now()) {
+	// ne consomme ni jeton Google ni clé d'inscription. Elle couvre toute la
+	// demande, et ne sert qu'une fois.
+	now := time.Now()
+	if !d.VerifierPreuve(s.prive, cle, now) {
 		journal.Warn("preuve de possession invalide")
 		refuser(w, http.StatusUnauthorized, "preuve de possession de la clé invalide (horloge décalée ?)")
 		return
 	}
+	if s.rejeux.DejaVue(d.Preuve, now) {
+		journal.Warn("demande d'inscription rejouée")
+		refuser(w, http.StatusUnauthorized, "demande déjà reçue")
+		return
+	}
 
-	a := base.Appareil{Nom: d.Nom, ClePublique: d.ClePublique, Systeme: d.Systeme}
+	a := base.Appareil{Nom: texteCourt(d.Nom, 30), ClePublique: d.ClePublique, Systeme: texteCourt(d.Systeme, 32)}
+	ins := base.Inscription{Jeton: jetonAleatoire()}
 	switch {
 	case d.JetonGoogle != "" && d.CleInscription != "":
 		refuser(w, http.StatusBadRequest, "un seul justificatif à la fois")
 		return
 	case d.JetonGoogle != "":
-		email, err := s.verifierGoogle(r.Context(), d.JetonGoogle)
+		email, sub, err := s.verifierGoogle(r.Context(), d.JetonGoogle)
 		if err != nil {
 			journal.Warn("jeton Google refusé", "erreur", err)
 			refuser(w, http.StatusUnauthorized, "connexion Google refusée")
@@ -109,62 +136,85 @@ func (s *Serveur) connexion(w http.ResponseWriter, r *http.Request) {
 			refuser(w, http.StatusForbidden, "ce compte Google n'a pas accès à ce réseau")
 			return
 		}
-		a.Proprietaire = email
-		a.Expire = time.Now().Add(s.cfg.DureeAppareil)
-	case d.CleInscription != "":
-		etiquette, utilisateur, err := s.base.UtiliserCle(d.CleInscription)
-		if err != nil {
-			journal.Warn("clé d'inscription refusée")
-			refuser(w, http.StatusUnauthorized, "clé d'inscription inconnue, déjà utilisée ou expirée")
+		if err := s.base.LierCompte(email, sub); err != nil {
+			journal.Warn("adresse liée à un autre compte Google", "email", email)
+			refuser(w, http.StatusForbidden, "cette adresse est liée à un autre compte Google")
 			return
 		}
-		a.Etiquette, a.Proprietaire = etiquette, utilisateur
-		if utilisateur != "" {
-			if s.chargerEquipe()[utilisateur] == "" {
-				refuser(w, http.StatusForbidden, "cet utilisateur n'a pas accès à ce réseau")
-				return
-			}
-			a.Expire = time.Now().Add(s.cfg.DureeAppareil)
-		}
+		a.Proprietaire = email
+	case d.CleInscription != "":
+		ins.CleInscription = d.CleInscription
 	default:
 		refuser(w, http.StatusBadRequest, "il faut un jeton Google ou une clé d'inscription")
 		return
 	}
+	// Vérifié dans la transaction, avant d'écrire : un refus ne gaspille pas
+	// la clé d'inscription.
+	ins.Accepter = func(etiquette, utilisateur string) error {
+		if utilisateur != "" && s.chargerEquipe()[utilisateur] == "" {
+			return errHorsEquipe
+		}
+		return nil
+	}
+	ins.Appareil, ins.DureePersonnel = a, s.cfg.DureeAppareil
 
-	jeton := jetonAleatoire()
-	a, err = s.base.Enregistrer(a, jeton, s.cfg.Reseau, s.cfg.Serveur)
-	if errors.Is(err, base.ErrAutreProprietaire) {
-		journal.Warn("tentative de reprise d'une clé inscrite", "proprietaire", a.Proprietaire, "etiquette", a.Etiquette)
+	a, err = s.base.Enregistrer(ins, s.cfg.Reseau, s.cfg.Serveur)
+	switch {
+	case errors.Is(err, base.ErrIntrouvable):
+		journal.Warn("clé d'inscription refusée")
+		refuser(w, http.StatusUnauthorized, "clé d'inscription inconnue, déjà utilisée ou expirée")
+		return
+	case errors.Is(err, errHorsEquipe):
+		refuser(w, http.StatusForbidden, err.Error())
+		return
+	case errors.Is(err, base.ErrAutreProprietaire), errors.Is(err, base.ErrNomPris):
+		journal.Warn("inscription en conflit", "erreur", err)
 		refuser(w, http.StatusConflict, err.Error())
 		return
-	}
-	if err != nil {
+	case errors.Is(err, base.ErrReseauPlein):
+		refuser(w, http.StatusServiceUnavailable, err.Error())
+		return
+	case err != nil:
 		journal.Error("inscription impossible", "erreur", err)
 		refuser(w, http.StatusInternalServerError, "inscription impossible")
 		return
 	}
+	s.rejeux.Retenir(d.Preuve, now)
 	if err := s.Synchroniser(); err != nil {
 		journal.Error("synchronisation", "erreur", err)
 	}
 	journal.Info("appareil inscrit", "nom", a.Nom, "adresse", a.Adresse, "proprietaire", a.Proprietaire, "etiquette", a.Etiquette)
 	_, texteVerrou := s.verrou()
 	repondre(w, http.StatusOK, protocole.ReponseConnexion{
-		Appareil: s.vers(a, true, time.Time{}),
+		Appareil: s.vers(a, a, time.Time{}),
 		Reseau:   s.cfg.Reseau.String(),
 		DNS:      s.cfg.Serveur.String(),
 		Domaine:  "sas.internal",
 		Serveur:  s.infoServeur(),
 		Verrou:   texteVerrou,
-		Jeton:    jeton,
+		Jeton:    ins.Jeton,
 	})
 }
 
-func (s *Serveur) vers(a base.Appareil, moi bool, poignee time.Time) protocole.Appareil {
+// vers : un appareil tel que le voit demandeur. Chacun voit tout de
+// lui-même ; des autres, le nécessaire au tunnel et au verrou. Une
+// machine ne voit pas les adresses email des personnes.
+func (s *Serveur) vers(a, demandeur base.Appareil, poignee time.Time) protocole.Appareil {
+	moi := a.ID == demandeur.ID
 	r := protocole.Appareil{Numero: uint32(a.ID), Nom: a.Nom, Adresse: a.Adresse.String(), ClePublique: a.ClePublique,
-		Proprietaire: a.Proprietaire, Etiquette: a.Etiquette, Systeme: a.Systeme, Moi: moi, Expire: a.Expire,
-		EnLigne: !poignee.IsZero() && time.Since(poignee) < 3*time.Minute}
+		Etiquette: a.Etiquette, Moi: moi, EnLigne: !poignee.IsZero() && time.Since(poignee) < 3*time.Minute,
+		Groupe: a.SignatureGroupe, SignatureExpire: a.SignatureExpire}
 	if len(a.Signature) > 0 {
 		r.Signature = base64.StdEncoding.EncodeToString(a.Signature)
+	}
+	// Le propriétaire fait partie du certificat : il faut le donner à qui
+	// doit le vérifier. On le tait seulement quand le demandeur est une
+	// machine et qu'il n'y a pas de certificat à vérifier.
+	if moi || demandeur.Etiquette == "" || len(a.Signature) > 0 {
+		r.Proprietaire = a.Proprietaire
+	}
+	if moi {
+		r.Systeme, r.Expire = a.Systeme, a.Expire
 	}
 	return r
 }
@@ -182,6 +232,12 @@ func (s *Serveur) authentifier(w http.ResponseWriter, r *http.Request) (base.App
 	}
 	if err != nil {
 		refuser(w, http.StatusInternalServerError, "base indisponible")
+		return a, false
+	}
+	// Coupé par une purge refusée (voir Synchroniser) : il reste en base,
+	// mais son propriétaire n'est plus dans l'équipe.
+	if a.Proprietaire != "" && s.chargerEquipe()[a.Proprietaire] == "" {
+		refuser(w, http.StatusUnauthorized, "appareil inconnu : il faut se reconnecter")
 		return a, false
 	}
 	return a, true
@@ -218,9 +274,9 @@ func (s *Serveur) reseau(w http.ResponseWriter, r *http.Request) {
 	for _, a := range tous {
 		switch {
 		case a.ID == moi.ID:
-			etat.Moi = s.vers(a, true, poignees[a.ClePublique])
+			etat.Moi = s.vers(a, moi, poignees[a.ClePublique])
 		case relies[a.Adresse]:
-			etat.Pairs = append(etat.Pairs, s.vers(a, false, poignees[a.ClePublique]))
+			etat.Pairs = append(etat.Pairs, s.vers(a, moi, poignees[a.ClePublique]))
 		}
 	}
 	for _, e := range politique.Entrant(flux, moi.Adresse) {
@@ -229,6 +285,9 @@ func (s *Serveur) reseau(w http.ResponseWriter, r *http.Request) {
 			ports = append(ports, p.String())
 		}
 		etat.Entrant = append(etat.Entrant, protocole.RegleEntrante{Sources: []string{e.Source.String()}, Ports: ports})
+	}
+	if texteVerrou != "" {
+		s.documentsSignes(&etat)
 	}
 	repondre(w, http.StatusOK, etat)
 }
@@ -244,26 +303,38 @@ func (s *Serveur) deconnexion(w http.ResponseWriter, r *http.Request) {
 	repondre(w, http.StatusOK, map[string]string{"etat": "déconnecté"})
 }
 
-// ImporterSignatures enregistre des signatures du verrou, après avoir
-// vérifié chacune avec la clé publique du verrou. Une signature fausse est
-// refusée : la clé privée du verrou n'est jamais passée par le serveur, il
-// ne peut que transmettre ce que l'admin a signé.
-func ImporterSignatures(b *base.Base, cleVerrou ed25519.PublicKey, liste []protocole.Appareil) (acceptees int, refusees []string) {
+// ImporterCertificats enregistre des certificats signés par le verrou,
+// après les avoir vérifiés avec sa clé publique et avec la fiche de chaque
+// appareil : étiquette et propriétaire doivent être ceux de la base. Un
+// certificat faux, périmé ou qui ne correspond plus est refusé. La clé
+// privée du verrou n'est jamais passée par le serveur : il ne peut que
+// transmettre ce que l'admin a signé.
+func ImporterCertificats(b *base.Base, cleVerrou ed25519.PublicKey, liste []protocole.Appareil) (acceptes int, refuses []string) {
+	fiches, err := b.Appareils()
+	if err != nil {
+		return 0, []string{"base indisponible"}
+	}
+	parCle := map[string]base.Appareil{}
+	for _, f := range fiches {
+		parCle[f.ClePublique] = f
+	}
 	for _, a := range liste {
-		cle, err1 := base64.StdEncoding.DecodeString(a.ClePublique)
+		f, connu := parCle[a.ClePublique]
+		k, err1 := base64.StdEncoding.DecodeString(a.ClePublique)
 		sig, err2 := base64.StdEncoding.DecodeString(a.Signature)
-		adresse, err3 := netip.ParseAddr(a.Adresse)
-		if err1 != nil || err2 != nil || err3 != nil || len(cle) != 32 {
-			refusees = append(refusees, a.Nom)
+		if !connu || err1 != nil || err2 != nil || len(k) != 32 {
+			refuses = append(refuses, a.Nom)
 			continue
 		}
-		var pub [32]byte
-		copy(pub[:], cle)
-		if !verrou.Verifier(cleVerrou, pub, adresse, sig) || b.DefinirSignature(a.ClePublique, adresse, sig) != nil {
-			refusees = append(refusees, a.Nom)
+		c := verrou.Certificat{Adresse: f.Adresse, Etiquette: f.Etiquette, Proprietaire: f.Proprietaire,
+			Groupe: a.Groupe, Expire: a.SignatureExpire}
+		copy(c.Cle[:], k)
+		if !c.Verifier(cleVerrou, sig, time.Now()) ||
+			b.DefinirCertificat(a.ClePublique, f.Adresse, sig, a.Groupe, a.SignatureExpire) != nil {
+			refuses = append(refuses, a.Nom)
 			continue
 		}
-		acceptees++
+		acceptes++
 	}
 	return
 }

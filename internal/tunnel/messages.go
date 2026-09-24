@@ -51,8 +51,9 @@ const (
 	// type + réservé + destinataire (4) + compteur (8)
 	enteteDonnees = 16
 	// Trame de relais, à l'intérieur d'un paquet de données chiffré :
-	// zéro (1) + réservé (3) + numéro d'appareil (4), puis un message
-	// complet du protocole, chiffré de bout en bout.
+	// zéro (1) + réservé (1) + longueur du message (2, grand-boutiste) +
+	// numéro d'appareil (4), puis un message complet du protocole, chiffré
+	// de bout en bout.
 	enteteRelais = 8
 
 	// MTU de l'interface. Le pire cas est un paquet relayé : IPv6 (40) +
@@ -96,7 +97,9 @@ func entete(t byte) []byte {
 func horodatage(t time.Time) []byte {
 	var b [tailleHorodatage]byte
 	binary.BigEndian.PutUint64(b[:8], uint64(t.Unix())+(1<<62))
-	binary.BigEndian.PutUint32(b[8:], uint32(t.Nanosecond()))
+	// Arrondi à 2^24 ns (environ 17 ms), comme WireGuard : la précision
+	// complète renseignerait trop finement sur l'horloge de l'appareil.
+	binary.BigEndian.PutUint32(b[8:], uint32(t.Nanosecond())&^0xffffff)
 	return b[:]
 }
 

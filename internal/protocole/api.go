@@ -54,17 +54,21 @@ type ReponseConnexion struct {
 }
 
 type Appareil struct {
-	Numero       uint32    `json:"numero"`
-	Nom          string    `json:"nom"`
-	Adresse      string    `json:"adresse"`
-	ClePublique  string    `json:"cle_publique,omitempty"`
-	Signature    string    `json:"signature,omitempty"` // du verrou, sur clé + adresse
-	Proprietaire string    `json:"proprietaire,omitempty"`
-	Etiquette    string    `json:"etiquette,omitempty"`
-	Systeme      string    `json:"systeme,omitempty"`
-	EnLigne      bool      `json:"en_ligne"`
-	Moi          bool      `json:"moi,omitempty"`
-	Expire       time.Time `json:"expire,omitzero"`
+	Numero      uint32 `json:"numero"`
+	Nom         string `json:"nom"`
+	Adresse     string `json:"adresse"`
+	ClePublique string `json:"cle_publique,omitempty"`
+	Signature   string `json:"signature,omitempty"` // certificat du verrou
+	// Groupe et SignatureExpire font partie du certificat signé : le client
+	// en a besoin pour le vérifier.
+	Groupe          string    `json:"groupe,omitempty"`
+	SignatureExpire time.Time `json:"signature_expire,omitzero"`
+	Proprietaire    string    `json:"proprietaire,omitempty"`
+	Etiquette       string    `json:"etiquette,omitempty"`
+	Systeme         string    `json:"systeme,omitempty"`
+	EnLigne         bool      `json:"en_ligne"`
+	Moi             bool      `json:"moi,omitempty"`
+	Expire          time.Time `json:"expire,omitzero"`
 }
 
 // RegleEntrante : ce que ces sources ont le droit d'ouvrir chez l'appareil
@@ -84,8 +88,26 @@ type EtatReseau struct {
 	// permise, dans un sens ou dans l'autre.
 	Pairs []Appareil `json:"pairs"`
 	// Entrant : ce que chacun peut ouvrir chez moi. Le reste est refusé,
-	// sauf les réponses à ce que j'ai ouvert.
+	// sauf les réponses à ce que j'ai ouvert. Sans verrou seulement : avec
+	// un verrou, l'appareil ignore ce champ et calcule ses règles lui-même
+	// à partir de la politique signée.
 	Entrant []RegleEntrante `json:"entrant"`
+	// Politique : le fichier de politique tel quel (base64), sa version et
+	// la signature du verrou.
+	Politique          string `json:"politique,omitempty"`
+	PolitiqueVersion   uint64 `json:"politique_version,omitempty"`
+	PolitiqueSignature string `json:"politique_signature,omitempty"`
+	// Revocations : la liste signée des clés bannies.
+	Revocations *ListeRevocations `json:"revocations,omitempty"`
+}
+
+// ListeRevocations : les clés que l'admin a bannies, signées ensemble. Un
+// appareil garde la plus récente qu'il ait vue, et ne revient jamais en
+// arrière.
+type ListeRevocations struct {
+	Version   uint64   `json:"version"`
+	Cles      []string `json:"cles"`
+	Signature string   `json:"signature"`
 }
 
 type Erreur struct {

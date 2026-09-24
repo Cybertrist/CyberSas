@@ -60,6 +60,10 @@ type Config struct {
 	// SeuilCharge : poignées de main par seconde au-delà desquelles le
 	// moteur exige un cookie. Zéro vaut 200.
 	SeuilCharge int
+	// Adresse : la nôtre dans le VPN. Un paquet reçu qui ne lui est pas
+	// destiné est refusé : sans cela, un pair autorisé sur un port pourrait
+	// nous faire relayer ses paquets vers notre réseau local.
+	Adresse netip.Addr
 }
 
 type EtatPair struct {
@@ -76,6 +80,9 @@ type pair struct {
 	adresses atomic.Pointer[[]netip.Prefix]
 	entrant  atomic.Pointer[regles]
 	numero   atomic.Uint32
+	// retire : ce pair a quitté la liste. Protégé par Moteur.mu : un pair
+	// lu juste avant son retrait ne doit pas se réinscrire dans les indices.
+	retire bool
 
 	mu                             sync.Mutex
 	point                          netip.AddrPort
@@ -92,7 +99,7 @@ type pair struct {
 	dernierHorodatage              []byte
 	dernierEnvoi, dernierePoignee  time.Time
 	derniereReception              time.Time // dernier paquet authentifié
-	derniereDonnee                 time.Time // dernier paquet non vide
+	recuSansRepondre               time.Time // première donnée reçue depuis notre dernier envoi
 	sansReponseDepuis              time.Time
 	recus, envoyes                 uint64
 	attente                        [][]byte
@@ -150,6 +157,30 @@ type Moteur struct {
 	// sondeRelais, pour les tests : reçoit chaque message relayé, tel que
 	// le serveur l'a en main.
 	sondeRelais atomic.Pointer[func([]byte)]
+
+	adresse atomic.Pointer[netip.Addr]
+	// Poignées de main relayées : un seau par pair (chez un client) ou par
+	// couple d'appareils (chez le serveur). Elles ne passent pas par les
+	// cookies, qui ne protègent que le chemin direct.
+	limiteRelais limiteur[uint64]
+}
+
+// DefinirAdresse change notre adresse dans le VPN, après une inscription.
+func (m *Moteur) DefinirAdresse(a netip.Addr) { m.adresse.Store(&a) }
+
+// reserverIndice tire un indice libre et non nul, et le lie à ce pair,
+// sauf s'il vient d'être retiré. Appelée avec m.mu tenu.
+func (m *Moteur) reserverIndice(p *pair) (uint32, bool) {
+	if p.retire {
+		return 0, false
+	}
+	for {
+		i := indiceAleatoire()
+		if _, pris := m.indices[i]; i != 0 && !pris {
+			m.indices[i] = p
+			return i, true
+		}
+	}
 }
 
 func Nouveau(c Config) *Moteur {
@@ -163,6 +194,9 @@ func Nouveau(c Config) *Moteur {
 		pairs: map[[32]byte]*pair{}, indices: map[uint32]*pair{}, parNumero: map[uint32]*pair{},
 		sansReponseMax: sansReponseDefaut}
 	m.charge.seuil = c.SeuilCharge
+	if c.Adresse.IsValid() {
+		m.DefinirAdresse(c.Adresse)
+	}
 	m.DefinirCle(c.Prive)
 	return m
 }
@@ -175,6 +209,9 @@ func (m *Moteur) DefinirCle(prive *ecdh.PrivateKey) {
 	m.mu.Lock()
 	m.prive.Store(prive)
 	m.nosCles.Store(&cles)
+	for _, p := range m.pairs {
+		p.retire = true
+	}
 	m.pairs = map[[32]byte]*pair{}
 	m.indices = map[uint32]*pair{}
 	m.parNumero = map[uint32]*pair{}
@@ -215,6 +252,7 @@ func (m *Moteur) DefinirPairs(liste []Pair) {
 	}
 	for k, p := range m.pairs {
 		if !vus[k] {
+			p.retire = true
 			delete(m.pairs, k)
 			for i, q := range m.indices {
 				if q == p {
@@ -344,6 +382,7 @@ func (m *Moteur) envoyerClair(p *pair, clair []byte) []envoi {
 	}
 	p.envoyes++
 	p.dernierEnvoi = time.Now()
+	p.recuSansRepondre = time.Time{}
 	if p.actif() && len(clair) > 0 && p.sansReponseDepuis.IsZero() {
 		p.sansReponseDepuis = p.dernierEnvoi
 	}
@@ -378,13 +417,15 @@ func (m *Moteur) lancerPoignee(p *pair) []envoi {
 		m.journal.Warn("initiation impossible", "erreur", err)
 		return nil
 	}
-	idx := indiceAleatoire()
 	m.mu.Lock()
 	if p.indicePoignee != 0 {
 		delete(m.indices, p.indicePoignee)
 	}
-	m.indices[idx] = p
+	idx, ok := m.reserverIndice(p)
 	m.mu.Unlock()
+	if !ok {
+		return nil
+	}
 	p.poignee, p.indicePoignee, p.derniereTentative = ini, idx, now
 
 	msg := binary.LittleEndian.AppendUint32(entete(typeInitiation), idx)
@@ -414,7 +455,9 @@ func (m *Moteur) boucleTun() error {
 		if p == nil {
 			continue
 		}
-		m.suivi.noter(ip)
+		if !reponseAutorisee(ip, p.entrant.Load()) {
+			m.suivi.noter(ip, p)
+		}
 		m.expedier(m.envoyerClair(p, append([]byte(nil), buf[:ip.longueur]...)))
 	}
 }
@@ -489,9 +532,14 @@ func (m *Moteur) recevoirInitiation(msg []byte, o origine) []envoi {
 		return nil
 	}
 	envoyeur := binary.LittleEndian.Uint32(msg[4:8])
-	// Sous charge, seul un expéditeur qui a prouvé posséder son adresse
-	// passe, et à un rythme limité. Les messages relayés ont déjà passé ce
-	// contrôle chez le serveur.
+	// Relayée, une initiation ne passe pas par les cookies : on la limite
+	// par pair. Sans cela, un appareil relié pourrait en envoyer en boucle
+	// et épuiser le processeur et la batterie de l'autre.
+	if o.relais && !m.limiteRelais.autoriser(uint64(o.numero)) {
+		return nil
+	}
+	// En direct et sous charge, seul un expéditeur qui a prouvé posséder son
+	// adresse passe, et à un rythme limité.
 	if !o.relais && m.charge.sousCharge() {
 		n := len(msg)
 		var mac1 [tailleMac]byte
@@ -535,15 +583,17 @@ func (m *Moteur) recevoirInitiation(msg []byte, o origine) []envoi {
 	if err != nil {
 		return nil
 	}
-	p.dernierHorodatage = charge
-	locale := indiceAleatoire()
-	s := nouvelleSession(locale, envoyeur, cles, false)
 	m.mu.Lock()
 	if p.suivante != nil {
 		delete(m.indices, p.suivante.locale)
 	}
-	m.indices[locale] = p
+	locale, ok := m.reserverIndice(p)
 	m.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	p.dernierHorodatage = charge
+	s := nouvelleSession(locale, envoyeur, cles, false)
 	// La session n'est promue qu'au premier paquet de données reçu avec
 	// elle : c'est la preuve que l'initiateur détient bien les mêmes clés.
 	p.suivante = s
@@ -577,6 +627,10 @@ func (m *Moteur) recevoirReponse(msg []byte, o origine) []envoi {
 	if p.poignee == nil || p.indicePoignee != dest {
 		return nil
 	}
+	// En direct, la réponse doit venir d'où l'on a envoyé l'initiation.
+	if !o.relais && o.point != p.point {
+		return nil
+	}
 	_, cles, err := p.poignee.LireMessage2(msg[12 : len(msg)-2*tailleMac])
 	if err != nil {
 		return nil
@@ -606,6 +660,7 @@ func (m *Moteur) recevoirReponse(msg []byte, o origine) []envoi {
 		p.envoyes++
 	}
 	p.dernierEnvoi = now
+	p.recuSansRepondre = time.Time{}
 	return envois
 }
 
@@ -681,8 +736,12 @@ func (m *Moteur) recevoirDonnees(msg []byte, o origine) []envoi {
 	p.recus++
 	now := time.Now()
 	p.derniereReception, p.sansReponseDepuis = now, time.Time{}
-	if len(clair) > 0 {
-		p.derniereDonnee = now
+	// Le minuteur du maintien passif part à la première donnée reçue
+	// depuis notre dernier envoi, et ne se réarme pas à chaque paquet :
+	// sinon, pendant un flux continu à sens unique, il ne partirait jamais
+	// et l'autre croirait la session morte.
+	if len(clair) > 0 && p.recuSansRepondre.IsZero() {
+		p.recuSansRepondre = now
 	}
 	// Un pair qui ne fait que répondre renvoie un maintien à celui qui en
 	// envoie, s'il est resté muet : l'autre sait ainsi que la liaison vit.
@@ -692,6 +751,7 @@ func (m *Moteur) recevoirDonnees(msg []byte, o origine) []envoi {
 		envois = append(envois, p.versLui(p.courante.chiffrer(nil)))
 		p.envoyes++
 		p.dernierEnvoi = now
+		p.recuSansRepondre = time.Time{}
 	}
 	p.mu.Unlock()
 
@@ -709,7 +769,14 @@ func (m *Moteur) recevoirDonnees(msg []byte, o origine) []envoi {
 		m.journal.Warn("source usurpée", "source", netip.AddrFrom4(ip.source), "numero", p.numero.Load())
 		return envois
 	}
-	if !p.entrant.Load().autorise(ip) && !m.suivi.retour(ip) {
+	// Le paquet doit nous être destiné. Sinon, écrit sur l'interface, il
+	// pourrait être routé vers notre réseau local : un pair autorisé sur le
+	// port 80 atteindrait le port 80 de toutes les machines derrière nous.
+	if moi := m.adresse.Load(); moi != nil && netip.AddrFrom4(ip.dest) != *moi {
+		m.journal.Warn("paquet qui ne nous est pas destiné", "dest", netip.AddrFrom4(ip.dest), "numero", p.numero.Load())
+		return envois
+	}
+	if !p.entrant.Load().autorise(ip) && !m.suivi.retour(ip, p) {
 		return envois
 	}
 	m.tun.Write(clair[:ip.longueur])
@@ -739,6 +806,11 @@ func (m *Moteur) recevoirTrame(de *pair, trame []byte) []envoi {
 		vers := m.parNumero[numero]
 		m.mu.RUnlock()
 		if vers == nil || vers == de {
+			return nil
+		}
+		// Les initiations relayées sont limitées par couple d'appareils :
+		// le serveur n'aide pas un appareil à en inonder un autre.
+		if msg[0] == typeInitiation && !m.limiteRelais.autoriser(uint64(source)<<32|uint64(numero)) {
 			return nil
 		}
 		if sonde := m.sondeRelais.Load(); sonde != nil {
@@ -803,23 +875,29 @@ func (m *Moteur) minuterie() {
 				envois = append(envois, p.versLui(p.courante.chiffrer(nil)))
 				p.envoyes++
 				p.dernierEnvoi = now
+				p.recuSansRepondre = time.Time{}
 			}
 			// Injoignable depuis trop longtemps : on ne garde pas
 			// indéfiniment de vieux paquets.
+			// On repart à zéro : un prochain paquet relancera une série
+			// de tentatives complète, au lieu d'être aussitôt jeté.
 			if !p.debutTentatives.IsZero() && now.Sub(p.debutTentatives) > abandonnerApres {
 				p.attente = nil
+				p.debutTentatives = time.Time{}
 			}
 		}
 		// Maintien passif : des données reçues, rien renvoyé depuis dix
 		// secondes. Un paquet vide dit à l'autre que la session vit.
-		if p.courante.utilisable() && p.derniereDonnee.After(p.dernierEnvoi) && now.Sub(p.derniereDonnee) >= maintienPassif {
+		if p.courante.utilisable() && !p.recuSansRepondre.IsZero() && now.Sub(p.recuSansRepondre) >= maintienPassif {
 			envois = append(envois, p.versLui(p.courante.chiffrer(nil)))
 			p.envoyes++
 			p.dernierEnvoi = now
+			p.recuSansRepondre = time.Time{}
 		}
 		p.mu.Unlock()
 		m.expedier(envois)
 	}
 	m.suivi.nettoyer()
-	m.charge.nettoyer()
+	m.charge.parIP.nettoyer()
+	m.limiteRelais.nettoyer()
 }

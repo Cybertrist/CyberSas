@@ -1,8 +1,12 @@
 # maison : un service hébergé à la maison, publié sur Internet.
 #
 # Le service n'a aucun port ouvert chez lui. Nginx le joint à travers le
-# VPN, par son nom MagicDNS, et ne laisse passer que les comptes Google de
-# l'équipe.
+# VPN, par son nom, et ne laisse passer que les comptes Google de l'équipe.
+#
+# Il vise le port 8081, que la politique n'ouvre qu'au serveur : c'est le
+# seul endroit où le service peut croire les en-têtes X-Email et X-User. Sur
+# le port 80, joignable directement par l'équipe dans le VPN, n'importe qui
+# pourrait les écrire lui-même.
 server {
     listen 443 ssl;
     http2 on;
@@ -17,10 +21,11 @@ server {
     location / {
         include /etc/nginx/extraits/google-verifier.conf;
         include /etc/nginx/extraits/proxy.conf;
+        proxy_set_header Cookie $cookie_sans_session;
 
         # 10.77.0.1 : le DNS du VPN, servi par sasd.
         resolver 10.77.0.1 valid=30s ipv6=off;
-        set $maison http://maison.sas.internal;
+        set $maison http://maison.sas.internal:8081;
         proxy_pass $maison;
     }
 }

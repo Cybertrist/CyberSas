@@ -9,9 +9,28 @@ resolver 127.0.0.11 valid=10s ipv6=off;
 
 server_tokens off;
 
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    ''      close;
+# Seul « Upgrade: websocket » est transmis ; tout autre changement de
+# protocole est ignoré, et la connexion reste une simple requête HTTP.
+map $http_upgrade $upgrade_accepte {
+    default          "";
+    "~*^websocket$"  "websocket";
+}
+map $upgrade_accepte $connection_upgrade {
+    default  "upgrade";
+    ""       "";
+}
+
+# Le cookie de session d'oauth2-proxy ne doit pas partir vers les services
+# publiés : c'est un laissez-passer valable douze heures sur tout le
+# domaine, qu'un service bavard ou compromis pourrait rejouer ailleurs. Deux
+# passes, pour la session et sa suite éventuelle (_oauth2_proxy_1).
+map $http_cookie $cookie_sans_session_1 {
+    default  $http_cookie;
+    "~^(?<avant>.*?)(?:;\s*)?_oauth2_proxy=[^;]*(?<apres>.*)$"  "$avant$apres";
+}
+map $cookie_sans_session_1 $cookie_sans_session {
+    default  $cookie_sans_session_1;
+    "~^(?<avant>.*?)(?:;\s*)?_oauth2_proxy_1=[^;]*(?<apres>.*)$"  "$avant$apres";
 }
 
 # Un journal par ligne, en JSON : prêt à partir vers un SIEM. L'utilisateur

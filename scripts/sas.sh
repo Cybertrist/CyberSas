@@ -1,21 +1,33 @@
 #!/bin/bash
 # CyberSas : tout ce qu'on fait sur la pile passe par ce script.
 #
+# Sur le serveur :
 #   sas.sh init                      secrets, autorité du labo, configurations
-#   sas.sh google <id> <secret>      le client OAuth créé dans Google Cloud
+#   sas.sh google <id>               le client OAuth de Google Cloud (le secret est demandé)
 #   sas.sh membre <email> <groupe>   donne l'accès à un compte Google (admins ou equipe)
-#   sas.sh retirer <email>           le lui retire
+#   sas.sh retirer <email>           le lui retire, et coupe ses appareils
 #   sas.sh demarrer                  construit et lance la pile
-#   sas.sh labo                      lance la fausse maison et le poste d'essai
-#   sas.sh signer                    signe les nouveaux appareils avec le verrou
-#   sas.sh essai                     vérifie que tout répond comme prévu
 #   sas.sh etat                      les appareils du VPN
 #   sas.sh arreter                   arrête tout, sans rien effacer
+#
+# Le verrou (dans le labo, tout se fait sur la même machine ; en vrai, sur
+# l'ordinateur de l'admin, voir docs/verrou.md) :
+#   sas.sh signer <clé> [<clé>...]   signe ces appareils-là, et eux seuls
+#   sas.sh politique                 signe politique/politique.json
+#   sas.sh revoquer <clé>            bannit un appareil (volé, perdu)
+#
+# Le labo seulement (TLS=labo) :
+#   sas.sh labo                      lance la fausse maison et le poste d'essai
+#   sas.sh essai                     vérifie que tout répond comme prévu
 #
 # Tout ce qui est secret ou propre à une installation s'écrit dans etat/,
 # qui n'est jamais versionné. etat/equipe.txt est la seule liste des
 # personnes autorisées : le VPN et les services web la lisent tous deux.
 set -euo pipefail
+
+# Tout ce que ce script crée n'est lisible que par son utilisateur : clés,
+# secrets, liste de l'équipe.
+umask 077
 
 # Sous Git Bash, sans cela, « /CN=... » et « /secrets » deviendraient des
 # chemins Windows.
@@ -29,6 +41,7 @@ cd "$RACINE"
 ETAT="etat"
 EQUIPE="$ETAT/equipe.txt"
 GOOGLE="$ETAT/secrets/google"
+VERROU="$ETAT/verrou"
 LABO=(docker compose -f labo/maison.yaml)
 
 dit ()    { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -40,7 +53,25 @@ charger_env () {
   [ -f .env ] || meurt ".env manquant : copier .env.exemple en .env et le remplir."
   set -a; . ./.env; set +a
   : "${DOMAINE:?DOMAINE manque dans .env}"
+  # Pas de valeur par défaut : oublier TLS ne doit pas faire tourner la
+  # production en mode labo.
+  case "${TLS:-}" in
+    labo) ;;
+    letsencrypt)
+      # Un domaine dédié : le cookie de session vaut pour tous ses
+      # sous-domaines. Sur exemple.fr, il partirait aussi vers
+      # blog.exemple.fr, hébergé ailleurs.
+      [ "$(echo "$DOMAINE" | tr -cd . | wc -c)" -ge 2 ] || meurt "DOMAINE doit être un sous-domaine dédié (sas.exemple.fr), pas $DOMAINE" ;;
+    *) meurt "TLS doit valoir labo ou letsencrypt dans .env" ;;
+  esac
   PORT_HTTPS="${PORT_HTTPS:-443}"
+  # oauth2-proxy tourne sous notre utilisateur : ses secrets restent en 0600.
+  export SAS_UID SAS_GID
+  SAS_UID="$(id -u)"; SAS_GID="$(id -g)"
+}
+
+labo_seulement () {
+  [ "$TLS" = labo ] || meurt "réservé au labo : cette commande inscrit, retire et écoute des appareils"
 }
 
 en_route () { docker compose ps --status running --services 2>/dev/null | grep -qx "$1"; }
@@ -52,15 +83,16 @@ init_ca () {
   mkdir -p "$ca/prive" "$ca/public" "$tls"
   if [ ! -f "$ca/public/cybersas-ca.pem" ]; then
     # nameConstraints : cette autorité ne peut signer que pour DOMAINE et
-    # ses sous-domaines. Installée sur un téléphone, elle ne pourrait pas
-    # servir à usurper un autre site.
+    # ses sous-domaines, et pour aucune adresse IP. Installée sur un
+    # téléphone, elle ne pourrait usurper ni un autre site, ni l'interface
+    # d'une box ou d'un NAS jointe par son adresse.
     openssl req -x509 -new -nodes -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
       -keyout "$ca/prive/ca.key" -out "$ca/public/cybersas-ca.pem" -days 1825 \
       -subj "/O=CyberSas/CN=CyberSas Labo CA" \
       -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
       -addext "keyUsage=critical,keyCertSign,cRLSign" \
-      -addext "nameConstraints=critical,permitted;DNS:$DOMAINE" 2>/dev/null
-    ok "autorité du labo créée, limitée à $DOMAINE"
+      -addext "nameConstraints=critical,permitted;DNS:$DOMAINE,excluded;IP:0.0.0.0/0.0.0.0,excluded;IP:0:0:0:0:0:0:0:0/0:0:0:0:0:0:0:0" 2>/dev/null
+    ok "autorité du labo créée, limitée à $DOMAINE et à aucune adresse IP"
   fi
   if [ ! -f "$tls/fullchain.pem" ]; then
     openssl req -new -nodes -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
@@ -71,6 +103,8 @@ init_ca () {
       -CAcreateserial -out "$tls/serveur.pem" -days 397 -extfile "$tls/extensions.cnf" 2>/dev/null
     cat "$tls/serveur.pem" "$ca/public/cybersas-ca.pem" > "$tls/fullchain.pem"
     rm -f "$tls/requete.csr" "$tls/extensions.cnf"
+    # Nginx lit le certificat en root, puis n'en a plus besoin.
+    chmod 644 "$tls/fullchain.pem" "$ca/public/cybersas-ca.pem"
     ok "certificat *.$DOMAINE signé"
   fi
 }
@@ -87,27 +121,22 @@ init_secrets () {
   [ -f "$GOOGLE/client_secret" ] || echo "a-remplir" > "$GOOGLE/client_secret"
 }
 
-# La clé du verrou du réseau : Ed25519, générée par openssl. Sa moitié
-# privée signe les appareils ; la moitié publique va au serveur, qui la
-# transmet aux appareils.
-#
-# Dans le labo, elle vit dans etat/verrou, sur la même machine que le
-# serveur, pour que tout tienne sur un poste. En production, elle ne doit
-# jamais toucher le VPS : elle reste sur l'ordinateur de l'admin (voir
-# cmd_signer).
+# La clé du verrou : Ed25519, générée par openssl. Dans le labo seulement.
+# En vrai, elle ne doit jamais toucher le serveur : elle se crée sur
+# l'ordinateur de l'admin avec « sas verrou creer », et seule sa moitié
+# publique est posée ici, dans etat/verrou/publique.
 init_verrou () {
-  local v="$ETAT/verrou"
-  mkdir -p "$v"
-  [ -f "$v/cle" ] && return
-  openssl genpkey -algorithm ed25519 -out "$v/cle.pem" 2>/dev/null
+  mkdir -p "$VERROU"
+  [ -f "$VERROU/publique" ] && return
+  [ "$TLS" = labo ] || meurt "pas de verrou : créer la clé sur l'ordinateur de l'admin (sas verrou creer), puis poser sa moitié publique dans $VERROU/publique"
+  openssl genpkey -algorithm ed25519 -out "$VERROU/cle.pem" 2>/dev/null
   # En PKCS#8, les 32 derniers octets de la clé privée sont la graine, et
   # ceux de la clé publique, la clé elle-même.
-  openssl pkey -in "$v/cle.pem" -outform DER 2>/dev/null | tail -c 32 | base64 > "$v/cle"
-  openssl pkey -in "$v/cle.pem" -pubout -outform DER 2>/dev/null | tail -c 32 | base64 > "$v/publique"
-  rm -f "$v/cle.pem"
-  chmod 600 "$v/cle"
-  [ "$(base64 -d < "$v/publique" | wc -c)" -eq 32 ] || meurt "clé du verrou mal formée"
-  ok "verrou du réseau créé"
+  openssl pkey -in "$VERROU/cle.pem" -outform DER 2>/dev/null | tail -c 32 | base64 > "$VERROU/cle"
+  openssl pkey -in "$VERROU/cle.pem" -pubout -outform DER 2>/dev/null | tail -c 32 | base64 > "$VERROU/publique"
+  rm -f "$VERROU/cle.pem"
+  [ "$(base64 -d < "$VERROU/publique" | wc -c)" -eq 32 ] || meurt "clé du verrou mal formée"
+  ok "verrou du réseau créé (labo : la clé privée est sur cette machine)"
 }
 
 # Écrit les configurations de etat/ à partir des modèles et de equipe.txt.
@@ -117,12 +146,13 @@ rendre () {
   mkdir -p "$ETAT/sasd" "$ETAT/oauth2-proxy"
   touch "$EQUIPE"
   local id; id="$(cat "$GOOGLE/client_id")"
-  awk 'NF>=2 && $1 !~ /^#/ {print $1}' "$EQUIPE" > "$ETAT/oauth2-proxy/emails.txt"
+  awk 'NF>=2 && $1 !~ /^#/ {print $1}' "$EQUIPE" > "$ETAT/oauth2-proxy/emails.txt.tmp"
+  mv "$ETAT/oauth2-proxy/emails.txt.tmp" "$ETAT/oauth2-proxy/emails.txt"
   # Le poste d'essai du labo s'inscrit avec une clé, sans compte Google.
-  { cat "$EQUIPE"; [ "${TLS:-labo}" = labo ] && echo "essai@labo.local equipe"; } > "$ETAT/sasd/equipe.txt.tmp"
+  { cat "$EQUIPE"; if [ "$TLS" = labo ]; then echo "essai@labo.local equipe"; fi; } > "$ETAT/sasd/equipe.txt.tmp"
   mv "$ETAT/sasd/equipe.txt.tmp" "$ETAT/sasd/equipe.txt"
   printf '%s\n' "$id" > "$ETAT/sasd/clients_google"
-  cp "$ETAT/verrou/publique" "$ETAT/sasd/verrou.pub"
+  cp "$VERROU/publique" "$ETAT/sasd/verrou.pub"
   sed -e "s|@DOMAINE@|$DOMAINE|g" -e "s|@GOOGLE_CLIENT_ID@|$id|g" oauth2-proxy/oauth2-proxy.cfg > "$ETAT/oauth2-proxy/oauth2-proxy.cfg"
 }
 
@@ -132,7 +162,7 @@ cmd_init () {
   charger_env
   command -v docker >/dev/null || meurt "Docker est introuvable."
   dit "Autorité et certificat du labo"
-  if [ "${TLS:-labo}" = labo ]; then init_ca; else ok "TLS=$TLS : rien à faire ici"; fi
+  if [ "$TLS" = labo ]; then init_ca; else ok "TLS=$TLS : rien à faire ici"; fi
   dit "Secrets"
   init_secrets
   init_verrou
@@ -149,22 +179,27 @@ cmd_init () {
 # --- Google et accès ----------------------------------------------------------
 
 cmd_google () {
-  [ $# -eq 2 ] || meurt "usage : sas.sh google <client_id> <client_secret>"
+  [ $# -eq 1 ] || meurt "usage : sas.sh google <client_id>  (le secret est demandé ensuite)"
   [[ "$1" == *.apps.googleusercontent.com ]] || meurt "un identifiant Google finit par .apps.googleusercontent.com"
+  # Le secret est lu au clavier : en argument, il finirait dans
+  # l'historique du shell et dans la liste des processus.
+  local secret
+  read -rsp "secret du client Google : " secret; echo
+  [ -n "$secret" ] || meurt "secret vide"
   mkdir -p "$GOOGLE"
   printf '%s\n' "$1" > "$GOOGLE/client_id"
-  printf '%s\n' "$2" > "$GOOGLE/client_secret"
+  printf '%s\n' "$secret" > "$GOOGLE/client_secret"
   rendre
   ok "client Google enregistré"
   # oauth2-proxy ne relit son identifiant qu'au démarrage.
-  en_route oauth2-proxy && docker compose restart oauth2-proxy >/dev/null 2>&1 && ok "oauth2-proxy relancé" || true
+  if en_route oauth2-proxy; then docker compose restart oauth2-proxy >/dev/null 2>&1 && ok "oauth2-proxy relancé"; fi
 }
 
 cmd_membre () {
   [ $# -eq 2 ] || meurt "usage : sas.sh membre <adresse google> <admins|equipe>"
   local mail="${1,,}" groupe="$2"
   case "$groupe" in admins|equipe) ;; *) meurt "groupe inconnu : $groupe (admins ou equipe)";; esac
-  [[ "$mail" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[a-z]+$ ]] || meurt "adresse invalide : $mail"
+  [[ "$mail" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]+$ ]] || meurt "adresse invalide : $mail"
   touch "$EQUIPE"
   awk -v m="$mail" '$1 != m' "$EQUIPE" > "$EQUIPE.tmp" && mv "$EQUIPE.tmp" "$EQUIPE"
   printf '%s %s\n' "$mail" "$groupe" >> "$EQUIPE"
@@ -175,11 +210,52 @@ cmd_membre () {
 cmd_retirer () {
   [ $# -eq 1 ] || meurt "usage : sas.sh retirer <adresse google>"
   local mail="${1,,}"
-  grep -q "^$mail " "$EQUIPE" 2>/dev/null || meurt "$mail n'est pas dans l'équipe"
+  grep -qF -- "$mail " "$EQUIPE" 2>/dev/null || meurt "$mail n'est pas dans l'équipe"
   awk -v m="$mail" '$1 != m' "$EQUIPE" > "$EQUIPE.tmp" && mv "$EQUIPE.tmp" "$EQUIPE"
   rendre
   # sasd purge lui-même les appareils d'une personne sortie de l'équipe.
   ok "$mail retiré : ses appareils sont coupés d'ici cinq secondes"
+  echo "  S'ils étaient signés, révoquer aussi leurs clés : sas.sh revoquer <clé>"
+}
+
+# --- le verrou ------------------------------------------------------------------
+
+# verrou_admin : lance « sas verrou » dans un conteneur jetable qui voit la
+# clé privée du verrou. En production, on ne passe pas par ici : la clé
+# n'est pas sur le serveur, et c'est l'admin qui lance sas sur son poste.
+verrou_admin () {
+  [ -f "$VERROU/cle" ] || meurt "pas de clé privée du verrou sur cette machine, et c'est normal hors du labo : signer depuis l'ordinateur de l'admin (docs/verrou.md)"
+  [ "$TLS" = labo ] || meurt "une clé privée de verrou traîne dans $VERROU sur le serveur : la déplacer sur l'ordinateur de l'admin"
+  local v; v="$(cd "$VERROU" && pwd -W 2>/dev/null || pwd)"
+  docker run --rm -i -v "$v:/verrou:ro" cybersas:dev sas verrou "$@" --fichier /verrou/cle
+}
+
+# Signe les appareils dont l'admin donne les clés, lues sur les appareils
+# eux-mêmes (sas etat, ou l'écran de l'appli). La liste venue du serveur ne
+# sert qu'à connaître les autres champs.
+cmd_signer () {
+  charger_env
+  [ $# -ge 1 ] || meurt "usage : sas.sh signer <clé publique> [<clé>...]  (lue sur l'appareil : sas etat)"
+  local cles; cles="$(IFS=,; echo "$*")"
+  sasd appareils --json | verrou_admin signer --cle "$cles" | sasd signatures | sed 's/^/  /'
+}
+
+cmd_politique () {
+  charger_env
+  verrou_admin politique < politique/politique.json > politique/politique.sig.tmp
+  mv politique/politique.sig.tmp politique/politique.sig
+  chmod 644 politique/politique.sig
+  ok "politique signée, version $(grep -o '"version": *[0-9]*' politique/politique.json | grep -o '[0-9]*$')"
+}
+
+cmd_revoquer () {
+  charger_env
+  [ $# -ge 1 ] || meurt "usage : sas.sh revoquer <clé publique> [<clé>...]"
+  local cles; cles="$(IFS=,; echo "$*")"
+  local actuelle="$ETAT/sasd/revocations.json"
+  { [ -f "$actuelle" ] && cat "$actuelle"; true; } | verrou_admin revoquer --cle "$cles" > "$actuelle.tmp"
+  mv "$actuelle.tmp" "$actuelle"
+  ok "liste de révocation à jour : les appareils l'appliqueront d'ici dix secondes"
 }
 
 # --- démarrage ---------------------------------------------------------------
@@ -194,9 +270,24 @@ attendre_sasd () {
   meurt "sasd ne répond pas après deux minutes."
 }
 
+cmd_demarrer () {
+  charger_env
+  [ -f "$ETAT/sasd/equipe.txt" ] || meurt "lancer d'abord : bash scripts/sas.sh init"
+  rendre
+  dit "Construction et démarrage de la pile"
+  docker compose build -q
+  if [ "$TLS" = labo ] && { [ ! -f politique/politique.sig ] || [ politique/politique.json -nt politique/politique.sig ]; }; then
+    cmd_politique
+  fi
+  docker compose up -d
+  attendre_sasd
+  ok "sasd répond"
+  dit "En ligne : https://vpn.$DOMAINE  https://auth.$DOMAINE  https://maison.$DOMAINE"
+}
+
 # Inscrit une machine du labo si elle ne l'est pas déjà. Le verrou lui est
 # donné d'avance, comme l'admin le ferait : elle refusera un serveur qui en
-# annoncerait un autre.
+# annoncerait un autre. La clé d'inscription passe par l'environnement.
 inscrire () {
   local svc="$1"; shift
   if "${LABO[@]}" exec -T "$svc" sas etat >/dev/null 2>&1; then
@@ -204,46 +295,28 @@ inscrire () {
   fi
   local cle; cle="$(sasd cle "$@" | tr -d '\r')"
   [ -n "$cle" ] || meurt "pas de clé pour $svc"
-  "${LABO[@]}" exec -T "$svc" sas rejoindre --serveur "https://vpn.$DOMAINE" --cle "$cle" --nom "$svc" \
-    --verrou "$(cat "$ETAT/verrou/publique")" | sed 's/^/  /'
+  "${LABO[@]}" exec -T -e SAS_CLE="$cle" "$svc" sas rejoindre --serveur "https://vpn.$DOMAINE" --nom "$svc" \
+    --verrou "$(cat "$VERROU/publique")" | sed 's/^/  /'
 }
 
-# Signe les appareils pas encore signés. La clé du verrou n'entre jamais
-# dans un conteneur du serveur : un conteneur jetable la lit, signe, et
-# s'en va. En production, cette étape se fait sur l'ordinateur de l'admin :
-#   ssh vps sasd appareils --json | sas verrou signer --fichier ~/.cybersas/verrou | ssh vps sasd signatures
-cmd_signer () {
-  charger_env
-  local v; v="$(cd "$ETAT/verrou" && pwd -W 2>/dev/null || pwd)"
-  sasd appareils --json \
-    | docker run --rm -i -v "$v:/verrou:ro" cybersas:dev sas verrou signer --fichier /verrou/cle \
-    | docker compose exec -T sasd sasd signatures | sed 's/^/  /'
-}
-
-cmd_demarrer () {
-  charger_env
-  [ -f "$ETAT/sasd/equipe.txt" ] || meurt "lancer d'abord : bash scripts/sas.sh init"
-  dit "Construction et démarrage de la pile"
-  docker compose up -d --build
-  attendre_sasd
-  ok "sasd répond"
-  dit "En ligne : https://vpn.$DOMAINE  https://auth.$DOMAINE  https://maison.$DOMAINE"
-}
+# La clé publique d'une machine du labo, lue sur la machine elle-même :
+# c'est ce que l'admin ferait avant de la signer.
+cle_de () { "${LABO[@]}" exec -T "$1" sas etat 2>/dev/null | sed -n 's/^clé publique : \([^ ]*\) .*/\1/p' | tr -d '\r'; }
 
 cmd_labo () {
-  charger_env
+  charger_env; labo_seulement
   dit "Démarrage du labo"
   "${LABO[@]}" up -d
-  inscrire maison --etiquette maison
+  inscrire maison --etiquette maison --nom maison
   inscrire poste --utilisateur essai@labo.local
-  dit "Signature des appareils par le verrou"
-  cmd_signer
+  dit "Signature des deux appareils, clés lues sur eux-mêmes"
+  cmd_signer "$(cle_de maison)" "$(cle_de poste)"
 }
 
 # --- essais -----------------------------------------------------------------
 
 cmd_essai () {
-  charger_env
+  charger_env; labo_seulement
   ECHECS=0
   # --ssl-no-revoke : le curl de Windows (Schannel) exige sinon une liste de
   # révocation que l'autorité du labo ne publie pas. Ignoré ailleurs.
@@ -291,7 +364,7 @@ cmd_essai () {
   dit "Dans le VPN, de bout en bout"
   local maison poste
   maison="$("${LABO[@]}" exec -T poste sas appareils 2>/dev/null | awk '$1=="maison" {print $2}' | tr -d '\r' || true)"
-  poste="$("${LABO[@]}" exec -T poste sas etat 2>/dev/null | awk '{print $2}' | tr -d '\r' || true)"
+  poste="$("${LABO[@]}" exec -T poste sas etat 2>/dev/null | awk 'NR==1 {print $2}' | tr -d '\r' || true)"
   [ -n "$maison" ] && ok "le poste voit maison ($maison) dans sa liste" || rate "le poste ne voit pas maison"
 
   # Si le serveur vient de redémarrer, les appareils ont perdu leur session
@@ -299,7 +372,7 @@ cmd_essai () {
   local t0=$SECONDS joint=""
   while [ $((SECONDS - t0)) -lt 60 ]; do
     if "${LABO[@]}" exec -T poste wget -qO- -T 2 "http://$maison/" >/dev/null 2>&1 \
-       && docker compose exec -T sasd wget -qO- -T 2 "http://$maison/" >/dev/null 2>&1; then joint=1; break; fi
+       && docker compose exec -T sasd wget -qO- -T 2 "http://$maison:8081/" >/dev/null 2>&1; then joint=1; break; fi
     sleep 1
   done
   [ -n "$joint" ] && ok "tous les appareils sont joignables (en $((SECONDS - t0)) s)" || rate "des appareils restent injoignables après une minute"
@@ -307,9 +380,13 @@ cmd_essai () {
   local nom
   nom="$(docker compose exec -T sasd nslookup maison.sas.internal 10.77.0.1 2>/dev/null \
          | sed -n 's/^Address: *\(10\.[0-9.]*\).*/\1/p' | head -1 || true)"
-  if [ -n "$nom" ] && docker compose exec -T sasd wget -qO- -T 5 "http://$nom/" 2>/dev/null | grep -q Hostname; then
-    ok "le serveur trouve maison.sas.internal ($nom) et atteint son service"
-  else rate "le serveur n'atteint pas maison.sas.internal"; fi
+  if [ -n "$nom" ] && docker compose exec -T sasd wget -qO- -T 5 "http://$nom:8081/" 2>/dev/null | grep -q Hostname; then
+    ok "le serveur trouve maison.sas.internal ($nom) et atteint le port publié"
+  else rate "le serveur n'atteint pas maison.sas.internal:8081"; fi
+
+  if "${LABO[@]}" exec -T poste wget -qO- -T 5 "http://$maison:8081/" >/dev/null 2>&1; then
+    rate "le poste atteint maison:8081, le port réservé au serveur (X-Email y serait falsifiable)"
+  else ok "le port publié de la maison est fermé au poste : X-Email n'y est pas falsifiable"; fi
 
   if "${LABO[@]}" exec -T poste wget -qO- -T 5 "http://$maison:8080/" >/dev/null 2>&1; then
     rate "le poste atteint maison:8080, que la politique ne lui donne pas"
@@ -327,37 +404,55 @@ cmd_essai () {
   # (Nginx publie la maison, le TLS se termine sur le VPS) doit, elle, se
   # voir en clair. Sans ce témoin, une capture vide ne prouverait rien.
   local cap; cap="$(mktemp)"
+  trap 'rm -f "${cap:-}"' EXIT
   local porte; porte="$(docker compose ps -q porte)"
   docker run --rm --network "container:$porte" --cap-add NET_RAW --cap-add NET_ADMIN alpine:3.24 sh -c \
     'apk add -q tcpdump >/dev/null 2>&1; timeout 12 tcpdump -i any -A -s0 -U -n 2>/dev/null' > "$cap" &
   local espion=$!
   sleep 5
   "${LABO[@]}" exec -T poste wget -qO- -T 3 "http://$maison/SECRET-BOUT-EN-BOUT" >/dev/null 2>&1 || true
-  docker compose exec -T sasd wget -qO- -T 3 "http://$maison/TEMOIN-DU-SERVEUR" >/dev/null 2>&1 || true
+  docker compose exec -T sasd wget -qO- -T 3 "http://$maison:8081/TEMOIN-DU-SERVEUR" >/dev/null 2>&1 || true
   wait "$espion" 2>/dev/null || true
   if ! grep -q "TEMOIN-DU-SERVEUR" "$cap"; then
     rate "la capture sur le serveur n'a rien vu, même le témoin : test non concluant"
   elif grep -q "SECRET-BOUT-EN-BOUT" "$cap"; then
     rate "le serveur a vu en clair une requête du poste vers la maison"
   else ok "le serveur relaie sans rien lire : le témoin apparaît dans la capture, le secret du poste jamais"; fi
-  rm -f "$cap"
+  rm -f "$cap"; trap - EXIT
 
   dit "Le verrou du réseau"
   # Un serveur piraté inscrit sa propre machine sous l'étiquette maison. Le
-  # poste la voit annoncée, mais sans signature du verrou : il la refuse.
+  # poste la voit annoncée, mais sans certificat du verrou : il la refuse.
   local intrus
-  "${LABO[@]}" exec -T -e SAS_ETAT=/tmp/intrus maison sas rejoindre --serveur "https://vpn.$DOMAINE" \
-    --cle "$(sasd cle --etiquette maison | tr -d '\r')" --nom intrus >/dev/null 2>&1 || true
+  "${LABO[@]}" exec -T -e SAS_ETAT=/tmp/intrus -e SAS_CLE="$(sasd cle --etiquette maison --nom intrus | tr -d '\r')" maison \
+    sas rejoindre --serveur "https://vpn.$DOMAINE" --nom intrus >/dev/null 2>&1 || true
   sleep 1
   intrus="$("${LABO[@]}" exec -T poste sas appareils 2>/dev/null | grep '^intrus' || true)"
   if [[ "$intrus" == *"REFUSÉ : pas signé par le verrou"* ]]; then
-    ok "un appareil que le serveur annonce sans signature est refusé par le poste"
+    ok "un appareil que le serveur annonce sans certificat est refusé par le poste"
   else rate "le poste ne refuse pas l'intrus non signé : ${intrus:-absent}"; fi
   sasd retirer intrus >/dev/null 2>&1 || true
   "${LABO[@]}" exec -T maison rm -rf /tmp/intrus
 
+  dit "Retirer quelqu'un de l'équipe le coupe"
+  # Une personne entre dans l'équipe, inscrit un appareil, puis en sort.
+  # C'est ce qui ne marchait pas quand l'équipe était montée fichier par
+  # fichier : le conteneur ne voyait jamais le fichier remplacé.
+  cmd_membre partant@labo.local equipe >/dev/null
+  sleep 6
+  "${LABO[@]}" exec -T -e SAS_ETAT=/tmp/partant -e SAS_CLE="$(sasd cle --utilisateur partant@labo.local | tr -d '\r')" maison \
+    sas rejoindre --serveur "https://vpn.$DOMAINE" --nom portable >/dev/null 2>&1 || true
+  if sasd appareils | grep -q "partant@labo.local"; then
+    cmd_retirer partant@labo.local >/dev/null
+    sleep 7
+    if sasd appareils | grep -q "partant@labo.local"; then
+      rate "l'appareil d'une personne retirée de l'équipe est toujours inscrit"
+    else ok "retirée de l'équipe, la personne perd ses appareils en quelques secondes"; fi
+  else rate "l'appareil de la personne n'a pas pu s'inscrire"; cmd_retirer partant@labo.local >/dev/null; fi
+  "${LABO[@]}" exec -T maison rm -rf /tmp/partant
+
   dit "Retirer un appareil le coupe"
-  sasd retirer poste >/dev/null
+  sasd retirer poste-essai >/dev/null
   sleep 7
   if "${LABO[@]}" exec -T poste wget -qO- -T 5 "http://$maison/" >/dev/null 2>&1; then
     rate "le poste retiré atteint encore la maison"
@@ -365,7 +460,7 @@ cmd_essai () {
   # On le remet, pour que l'essai puisse se relancer.
   "${LABO[@]}" exec -T poste rm -f /var/lib/sas/etat.json
   inscrire poste --utilisateur essai@labo.local >/dev/null
-  cmd_signer >/dev/null 2>&1
+  cmd_signer "$(cle_de poste)" >/dev/null 2>&1
 
   echo
   [ "$ECHECS" -eq 0 ] && dit "Tout est conforme." || meurt "$ECHECS vérification(s) en échec."
@@ -383,10 +478,12 @@ case "$c" in
   membre) charger_env; cmd_membre "$@" ;;
   retirer) charger_env; cmd_retirer "$@" ;;
   demarrer) cmd_demarrer ;;
+  signer) cmd_signer "$@" ;;
+  politique) cmd_politique ;;
+  revoquer) cmd_revoquer "$@" ;;
   labo) cmd_labo ;;
-  signer) cmd_signer ;;
   essai) cmd_essai ;;
   etat) cmd_etat ;;
   arreter) cmd_arreter ;;
-  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

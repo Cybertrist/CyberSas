@@ -54,7 +54,7 @@ func TestJoignables(t *testing.T) {
 }
 
 func TestNft(t *testing.T) {
-	r := Nft(pol.Compiler(equipe, apps, serveur), "sas0", serveur)
+	r := Nft(pol.Compiler(equipe, apps, serveur), "sas0", serveur, netip.MustParsePrefix("10.77.0.0/24"))
 	for _, attendu := range []string{
 		`ip saddr { 10.77.0.1 } ip daddr { 10.77.0.2 } tcp dport 80 accept`,
 		`iifname "sas0" counter drop comment "aucun paquet ne traverse le serveur en clair"`,

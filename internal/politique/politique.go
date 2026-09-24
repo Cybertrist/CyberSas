@@ -37,7 +37,10 @@ type Regle struct {
 }
 
 type Politique struct {
-	Regles []Regle `json:"regles"`
+	// Version : croît à chaque modification. Signée avec le fichier, elle
+	// empêche un serveur de resservir une ancienne politique plus permissive.
+	Version uint64  `json:"version"`
+	Regles  []Regle `json:"regles"`
 }
 
 // Equipe : adresse Google, en minuscules, vers le groupe.
@@ -69,9 +72,17 @@ func Charger(chemin string) (Politique, error) {
 	if err := json.Unmarshal(b, &p); err != nil {
 		return p, fmt.Errorf("%s : %w", chemin, err)
 	}
+	if _, err := Verifier(p); err != nil {
+		return p, fmt.Errorf("%s, %w", chemin, err)
+	}
+	return p, nil
+}
+
+// Verifier : chaque règle doit avoir des ports lisibles.
+func Verifier(p Politique) (Politique, error) {
 	for i, r := range p.Regles {
 		if _, err := LirePorts(r.Ports); err != nil {
-			return p, fmt.Errorf("%s, règle %d : %w", chemin, i+1, err)
+			return p, fmt.Errorf("règle %d : %w", i+1, err)
 		}
 	}
 	return p, nil

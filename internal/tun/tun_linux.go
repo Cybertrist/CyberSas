@@ -48,13 +48,29 @@ func Ouvrir(nom string) (*Tun, error) {
 
 // Configurer donne son adresse à l'interface et la monte.
 func (t *Tun) Configurer(adresse netip.Prefix, mtu int) error {
+	// On vide d'abord l'interface : après une réinscription, l'adresse change,
+	// et l'ancienne resterait sinon en place. Le noyau pourrait alors
+	// continuer d'émettre avec elle, et les pairs rejetteraient ces paquets
+	// comme usurpés.
 	for _, args := range [][]string{
-		{"addr", "replace", adresse.String(), "dev", t.Nom},
+		{"addr", "flush", "dev", t.Nom},
+		{"addr", "add", adresse.String(), "dev", t.Nom},
 		{"link", "set", "dev", t.Nom, "mtu", strconv.Itoa(mtu), "up"},
 	} {
-		if sortie, err := exec.Command("ip", args...).CombinedOutput(); err != nil {
+		if sortie, err := exec.Command(commandeIP(), args...).CombinedOutput(); err != nil {
 			return fmt.Errorf("ip %v : %v : %s", args, err, sortie)
 		}
 	}
 	return nil
+}
+
+// commandeIP : un chemin absolu. Chercher « ip » dans le PATH d'un démon
+// qui tourne en root, c'est exécuter le premier « ip » venu.
+func commandeIP() string {
+	for _, c := range []string{"/sbin/ip", "/usr/sbin/ip", "/bin/ip", "/usr/bin/ip"} {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return "/sbin/ip"
 }

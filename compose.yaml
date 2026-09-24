@@ -1,7 +1,8 @@
 # CyberSas : la pile qui tourne sur le serveur public (le VPS).
 #
 # sasd est tout le VPN : le moteur du tunnel, l'API où les appareils
-# s'inscrivent, le pare-feu entre appareils et le DNS du réseau.
+# s'inscrivent, le relais chiffré entre appareils, le pare-feu du serveur et
+# le DNS du réseau.
 #
 # porte ne fait rien : elle possède l'espace réseau, les ports et les noms,
 # et ne redémarre jamais. sasd et Nginx s'y greffent. Si l'un d'eux
@@ -14,12 +15,20 @@
 #
 # oauth2-proxy protège les pages web publiées avec la connexion Google.
 #
+# Durcissement, pour tous : aucune capacité par défaut (seules celles
+# nécessaires sont rendues), pas d'élévation de privilèges, système de
+# fichiers en lecture seule, images épinglées par empreinte. Plus besoin
+# de routage IP sur le serveur : rien ne le traverse en clair.
+#
 # Rien ne se lance à la main : scripts/sas.sh prépare les secrets et les
 # configurations dans etat/, puis démarre la pile.
 
 name: cybersas
 
-x-journaux: &journaux
+x-commun: &commun
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
   logging:
     driver: json-file
     options:
@@ -28,13 +37,11 @@ x-journaux: &journaux
 
 services:
   porte:
-    image: alpine:3.24
-    restart: unless-stopped
+    <<: *commun
+    image: alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
     command: ["sleep", "infinity"]
     init: true
-    sysctls:
-      # Les paquets d'un appareil à l'autre traversent le serveur.
-      net.ipv4.ip_forward: "1"
+    read_only: true
     ports:
       - "${PORT_HTTP:-80}:80"
       - "${PORT_HTTPS:-443}:443"
@@ -46,35 +53,47 @@ services:
         aliases: *noms
 
   sasd:
+    <<: *commun
     build: .
     image: cybersas:dev
-    restart: unless-stopped
-    <<: *journaux
     command: ["sasd"]
     network_mode: service:porte
     depends_on: [porte]
-    cap_add: [NET_ADMIN]
+    # NET_ADMIN : l'interface du VPN et le pare-feu. NET_BIND_SERVICE : le
+    # DNS du réseau, sur le port 53. DAC_READ_SEARCH : lire, sans pouvoir y
+    # écrire, la configuration que sas.sh laisse en 0600 à son utilisateur.
+    cap_add: [NET_ADMIN, NET_BIND_SERVICE, DAC_READ_SEARCH]
     devices: ["/dev/net/tun:/dev/net/tun"]
+    read_only: true
+    tmpfs: [/tmp]
     environment:
       SAS_DOMAINE: ${DOMAINE}
       SAS_POINT: vpn.${DOMAINE}:${PORT_TUNNEL:-51820}
+    # Des dossiers, pas des fichiers : un fichier monté seul suit son inode,
+    # et un fichier remplacé (sas.sh écrit à côté puis renomme) resterait
+    # invisible au conteneur. Retirer quelqu'un de l'équipe n'aurait alors
+    # aucun effet.
     volumes:
       - sasd:/var/lib/sasd
-      - ./etat/sasd/equipe.txt:/config/equipe.txt:ro
-      - ./etat/sasd/clients_google:/config/clients_google:ro
-      - ./etat/sasd/verrou.pub:/config/verrou.pub:ro
-      - ./politique/politique.json:/config/politique.json:ro
+      - ./etat/sasd:/config:ro
+      - ./politique:/politique:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/sante"]
       interval: 5s
       retries: 12
 
   nginx:
-    image: nginx:1.30.5-alpine
-    restart: unless-stopped
-    <<: *journaux
+    <<: *commun
+    image: nginx:1.30.5-alpine@sha256:bf3201ab56f23e5954646379c775d511fc466e9f11376d9725361064ad07ed35
     network_mode: service:porte
     depends_on: [porte]
+    # Le maître démarre en root, écrit sa configuration, puis ses ouvriers
+    # passent sous l'utilisateur nginx. Pas de NET_RAW : un Nginx compromis
+    # ne peut pas écouter l'interface du VPN qu'il partage.
+    # DAC_READ_SEARCH : lire la clé TLS, en 0600, sans pouvoir l'écrire.
+    cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE, DAC_READ_SEARCH]
+    read_only: true
+    tmpfs: [/etc/nginx/conf.d, /var/cache/nginx, /var/run, /tmp]
     environment:
       DOMAINE: ${DOMAINE}
       # Seule DOMAINE est remplacée dans les modèles : $host et les autres
@@ -87,14 +106,17 @@ services:
       - journaux-nginx:/var/log/nginx
 
   oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
-    restart: unless-stopped
-    <<: *journaux
+    <<: *commun
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4@sha256:b1b2021fe8f4004573e8d690dec6c7bb29cc44364572cf8510a05bf3a0ae2ded
     command: ["--config=/config/oauth2-proxy.cfg"]
+    # Il tourne sous l'utilisateur qui a lancé sas.sh : ses secrets restent
+    # en 0600, lisibles par cet utilisateur seul sur l'hôte.
+    user: "${SAS_UID:-65532}:${SAS_GID:-65532}"
     read_only: true
     volumes:
       - ./etat/oauth2-proxy:/config:ro
       - ./etat/secrets/google:/secrets:ro
+    # interne : pour que Nginx le joigne. sortie : pour joindre Google.
     networks: [interne, sortie]
 
 networks:
@@ -102,13 +124,12 @@ networks:
     name: cybersas_public
     ipam:
       config: [{subnet: 172.30.1.0/24}]
+  # Entre Nginx et oauth2-proxy. Sans passerelle : rien n'en sort par lui.
   interne:
     name: cybersas_interne
-    # Pas de passerelle : ce qui n'est que sur ce réseau ne sort jamais.
     internal: true
     ipam:
       config: [{subnet: 172.30.2.0/24}]
-  # La sortie vers Google, pour oauth2-proxy.
   sortie:
     name: cybersas_sortie
     ipam:

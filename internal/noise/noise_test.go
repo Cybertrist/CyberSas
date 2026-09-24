@@ -167,6 +167,27 @@ func TestMessageModifie(t *testing.T) {
 	}
 }
 
+func TestReponseForgeeNeCassePasLaPoignee(t *testing.T) {
+	serveur, _ := GenererCle()
+	client, _ := GenererCle()
+	ini := NouvelInitiateur(client, serveur.PublicKey().Bytes(), prologue)
+	m1, _ := ini.Message1(nil)
+	rep := NouveauRepondeur(serveur, prologue)
+	rep.LireMessage1(m1)
+	m2, _, _ := rep.Message2(nil)
+
+	// Un attaquant répond le premier, avec n'importe quoi.
+	faux := make([]byte, len(m2))
+	rand.Read(faux)
+	if _, _, err := ini.LireMessage2(faux); err == nil {
+		t.Fatal("réponse forgée acceptée")
+	}
+	// La vraie réponse doit toujours passer.
+	if _, _, err := ini.LireMessage2(m2); err != nil {
+		t.Fatalf("la vraie réponse est refusée après une réponse forgée : %v", err)
+	}
+}
+
 func TestProloguesDifferents(t *testing.T) {
 	serveur, _ := GenererCle()
 	client, _ := GenererCle()

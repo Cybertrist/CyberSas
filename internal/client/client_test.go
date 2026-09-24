@@ -1,12 +1,15 @@
 package client
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/Cybertrist/CyberSas/internal/protocole"
+	"github.com/Cybertrist/CyberSas/internal/tunnel"
 	"github.com/Cybertrist/CyberSas/internal/verrou"
 )
 
@@ -16,60 +19,187 @@ func b64(n int) string {
 	return base64.StdEncoding.EncodeToString(b)
 }
 
-func TestConstruireAvecVerrou(t *testing.T) {
-	pubV, priveV, _ := verrou.Generer()
-	texteV := base64.StdEncoding.EncodeToString(pubV)
-	cleServeur := b64(32)
-	signe, intrus := b64(32), b64(32)
-	k, _ := cle32(signe)
-	sig := verrou.Signer(priveV, k, netip.MustParseAddr("10.77.0.2"))
+// reseauSigne : un serveur, cet appareil (poste d'alice, groupe equipe),
+// une maison et un nas, avec une politique qui ouvre à l'équipe le TCP 80
+// de la maison, et au serveur le TCP 80 de tout le monde.
+type reseauSigne struct {
+	prive ed25519.PrivateKey
+	ret   Retenu
+	etat  protocole.EtatReseau
+}
 
-	r := protocole.EtatReseau{
+const politiqueJSON = `{"version": 3, "regles": [
+	{"de": ["groupe:equipe"], "vers": ["etiquette:maison"], "ports": ["tcp:80"]},
+	{"de": ["serveur"], "vers": ["*"], "ports": ["tcp:80"]}
+]}`
+
+func (r *reseauSigne) appareil(numero uint32, nom, adresse, etiquette, proprietaire, groupe string) protocole.Appareil {
+	cle := b64(32)
+	k, _ := cle32(cle)
+	exp := time.Now().Add(time.Hour).Truncate(time.Second)
+	c := verrou.Certificat{Cle: k, Adresse: netip.MustParseAddr(adresse), Etiquette: etiquette,
+		Proprietaire: proprietaire, Groupe: groupe, Expire: exp}
+	sig, _ := c.Signer(r.prive)
+	return protocole.Appareil{Numero: numero, Nom: nom, Adresse: adresse, ClePublique: cle, Etiquette: etiquette,
+		Proprietaire: proprietaire, Groupe: groupe, SignatureExpire: exp, Signature: base64.StdEncoding.EncodeToString(sig)}
+}
+
+func nouveauReseauSigne(t *testing.T) *reseauSigne {
+	pub, prive, _ := verrou.Generer()
+	r := &reseauSigne{prive: prive}
+	texteV := base64.StdEncoding.EncodeToString(pub)
+	cleServeur := b64(32)
+	moi := r.appareil(4, "poste-alice", "10.77.0.4", "", "alice@x.fr", "equipe")
+	r.ret = Retenu{CleServeur: cleServeur, Verrou: texteV, MaCle: moi.ClePublique,
+		Moi: netip.MustParseAddr("10.77.0.4"), Reseau: netip.MustParsePrefix("10.77.0.0/24")}
+	r.etat = protocole.EtatReseau{
 		Serveur: protocole.Serveur{ClePublique: cleServeur, Adresse: "10.77.0.1"},
 		Verrou:  texteV,
+		Moi:     moi,
 		Pairs: []protocole.Appareil{
-			{Numero: 2, Nom: "maison", Adresse: "10.77.0.2", ClePublique: signe, Signature: base64.StdEncoding.EncodeToString(sig)},
-			// Un serveur piraté glisse sa propre clé sous un autre nom.
-			{Numero: 9, Nom: "maison-bis", Adresse: "10.77.0.9", ClePublique: intrus},
-			// Ou réutilise une signature valide pour une autre adresse.
-			{Numero: 3, Nom: "vol", Adresse: "10.77.0.3", ClePublique: signe, Signature: base64.StdEncoding.EncodeToString(sig)},
+			r.appareil(2, "maison", "10.77.0.2", "maison", "", ""),
+			r.appareil(3, "nas", "10.77.0.3", "nas", "", ""),
 		},
-		Entrant: []protocole.RegleEntrante{{Sources: []string{"10.77.0.2"}, Ports: []string{"tcp:22"}}},
+		Politique:          base64.StdEncoding.EncodeToString([]byte(politiqueJSON)),
+		PolitiqueVersion:   3,
+		PolitiqueSignature: base64.StdEncoding.EncodeToString(verrou.SignerPolitique(prive, 3, []byte(politiqueJSON))),
 	}
-	pairs, ecartes, err := Construire(r, cleServeur, texteV, netip.MustParseAddrPort("192.0.2.1:51820"))
+	return r
+}
+
+func (r *reseauSigne) construire(t *testing.T) ([]tunnel.Pair, []Ecarte) {
+	t.Helper()
+	pairs, ecartes, err := Construire(r.etat, &r.ret, netip.MustParseAddrPort("192.0.2.1:51820"), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pairs) != 2 || pairs[1].Numero != 2 {
-		t.Fatalf("attendu : le serveur et maison seulement, obtenu %d pairs", len(pairs))
+	return pairs, ecartes
+}
+
+func entrantDe(pairs []tunnel.Pair, adresse string) []tunnel.Regle {
+	for _, p := range pairs {
+		if p.Adresses[0].Addr() == netip.MustParseAddr(adresse) {
+			return p.Entrant
+		}
 	}
-	if len(pairs[1].Entrant) != 1 || pairs[1].Entrant[0].Debut != 22 {
-		t.Fatal("la règle entrante de maison n'a pas suivi")
+	return nil
+}
+
+func TestVerrouReglesCalculeesLocalement(t *testing.T) {
+	r := nouveauReseauSigne(t)
+	// Le serveur, piraté, s'ouvre tous les ports de l'appareil.
+	r.etat.Entrant = []protocole.RegleEntrante{{Sources: []string{"10.77.0.1", "10.77.0.2"}, Ports: []string{"*"}}}
+	pairs, _ := r.construire(t)
+	// Rien de tout ça ne passe : ce qui compte est la politique signée, qui
+	// n'ouvre chez alice que le TCP 80 au serveur, et rien à la maison.
+	if e := entrantDe(pairs, "10.77.0.1"); len(e) != 1 || e[0].Proto != 6 || e[0].Debut != 80 {
+		t.Fatalf("règles du serveur chez alice : %+v, attendu TCP 80 seulement", e)
 	}
-	if len(ecartes) != 2 {
-		t.Fatalf("les deux pairs non signés auraient dû être écartés : %v", ecartes)
+	if e := entrantDe(pairs, "10.77.0.2"); len(e) != 0 {
+		t.Fatalf("la maison ne doit rien pouvoir ouvrir chez alice : %+v", e)
 	}
 }
 
-func TestConstruireRefuseAutreServeur(t *testing.T) {
-	r := protocole.EtatReseau{Serveur: protocole.Serveur{ClePublique: b64(32), Adresse: "10.77.0.1"}}
-	if _, _, err := Construire(r, b64(32), "", netip.AddrPort{}); err == nil {
+func TestVerrouPairsNonSignes(t *testing.T) {
+	r := nouveauReseauSigne(t)
+	maison := r.etat.Pairs[0]
+	intrus := maison
+	intrus.Numero, intrus.Nom, intrus.Adresse, intrus.ClePublique = 9, "maison-bis", "10.77.0.9", b64(32) // clé du serveur piraté
+	vol := maison
+	vol.Numero, vol.Nom, vol.Adresse = 8, "vol", "10.77.0.8" // bonne signature, autre adresse
+	promu := r.etat.Pairs[1]
+	promu.Etiquette = "maison" // le nas se fait passer pour une maison
+	r.etat.Pairs = []protocole.Appareil{maison, intrus, vol, promu}
+	pairs, ecartes := r.construire(t)
+	if len(pairs) != 2 || pairs[1].Numero != 2 {
+		t.Fatalf("seuls le serveur et la vraie maison devaient rester, obtenu %d pairs", len(pairs))
+	}
+	if len(ecartes) != 3 {
+		t.Fatalf("trois pairs à écarter, obtenu : %+v", ecartes)
+	}
+}
+
+func TestVerrouAdressesInvalides(t *testing.T) {
+	r := nouveauReseauSigne(t)
+	for _, a := range []string{"2001:db8::1", "::ffff:10.77.0.2", "192.168.1.1", "10.77.0.4", "10.77.0.1"} {
+		p := r.etat.Pairs[0]
+		p.Adresse = a
+		r.etat.Pairs = []protocole.Appareil{p}
+		pairs, _ := r.construire(t) // ne doit jamais paniquer
+		if len(pairs) != 1 {
+			t.Errorf("adresse %s acceptée pour un pair", a)
+		}
+	}
+}
+
+func TestVerrouRevocationsEtRetourEnArriere(t *testing.T) {
+	r := nouveauReseauSigne(t)
+	maison := r.etat.Pairs[0]
+	k, _ := cle32(maison.ClePublique)
+	r.etat.Revocations = &protocole.ListeRevocations{Version: 2, Cles: []string{maison.ClePublique},
+		Signature: base64.StdEncoding.EncodeToString(verrou.SignerRevocations(r.prive, 2, [][32]byte{k}))}
+	pairs, _ := r.construire(t)
+	if len(pairs) != 2 { // serveur et nas
+		t.Fatalf("la maison révoquée est encore là : %d pairs", len(pairs))
+	}
+	// Le serveur resservirait une liste plus ancienne, vide : ignorée.
+	r.etat.Revocations = &protocole.ListeRevocations{Version: 1, Cles: nil,
+		Signature: base64.StdEncoding.EncodeToString(verrou.SignerRevocations(r.prive, 1, nil))}
+	if pairs, _ := r.construire(t); len(pairs) != 2 {
+		t.Fatal("une liste de révocation plus ancienne a fait revenir la maison")
+	}
+	// Ni la politique : on a vu la version 3, la 2 est refusée.
+	vieille := `{"version": 2, "regles": [{"de": ["*"], "vers": ["*"], "ports": ["*"]}]}`
+	r.etat.Politique = base64.StdEncoding.EncodeToString([]byte(vieille))
+	r.etat.PolitiqueVersion = 2
+	r.etat.PolitiqueSignature = base64.StdEncoding.EncodeToString(verrou.SignerPolitique(r.prive, 2, []byte(vieille)))
+	pairs, _ = r.construire(t)
+	if e := entrantDe(pairs, "10.77.0.3"); len(e) != 0 {
+		t.Fatalf("une politique plus ancienne et plus permissive a été appliquée : %+v", e)
+	}
+}
+
+func TestVerrouCetAppareilNonSigne(t *testing.T) {
+	r := nouveauReseauSigne(t)
+	r.etat.Moi.Signature = ""
+	pairs, ecartes := r.construire(t)
+	for _, p := range pairs {
+		if len(p.Entrant) != 0 {
+			t.Fatal("sans certificat pour soi, rien ne doit pouvoir entrer")
+		}
+	}
+	if len(ecartes) == 0 {
+		t.Fatal("le client doit signaler qu'il n'est pas signé")
+	}
+}
+
+func TestConstruireRefuseAutreServeurOuVerrou(t *testing.T) {
+	r := nouveauReseauSigne(t)
+	autre := r.etat
+	autre.Serveur.ClePublique = b64(32)
+	if _, _, err := Construire(autre, &r.ret, netip.AddrPort{}, time.Now()); err == nil {
 		t.Fatal("une clé de serveur différente de celle retenue a été acceptée")
 	}
+	autre = r.etat
+	autre.Verrou = ""
+	if _, _, err := Construire(autre, &r.ret, netip.AddrPort{}, time.Now()); err == nil {
+		t.Fatal("la disparition du verrou a été acceptée")
+	}
 }
 
-func TestConstruireRefuseAutreVerrou(t *testing.T) {
-	a, _, _ := verrou.Generer()
-	b, _, _ := verrou.Generer()
-	cle := b64(32)
-	r := protocole.EtatReseau{Serveur: protocole.Serveur{ClePublique: cle, Adresse: "10.77.0.1"},
-		Verrou: base64.StdEncoding.EncodeToString(b)}
-	if _, _, err := Construire(r, cle, base64.StdEncoding.EncodeToString(a), netip.AddrPort{}); err == nil {
-		t.Fatal("un changement de verrou a été accepté")
+func TestAPIRefuseHTTP(t *testing.T) {
+	for _, u := range []string{"http://vpn.exemple.fr", "vpn.exemple.fr", "ftp://x"} {
+		if _, err := NouvelleAPI(u, nil); err == nil {
+			t.Errorf("%s accepté", u)
+		}
 	}
-	// Retirer le verrou n'est pas plus accepté : ce serait le contourner.
-	r.Verrou = ""
-	if _, _, err := Construire(r, cle, base64.StdEncoding.EncodeToString(a), netip.AddrPort{}); err == nil {
-		t.Fatal("la disparition du verrou a été acceptée")
+	if _, err := NouvelleAPI("https://vpn.exemple.fr", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPropre(t *testing.T) {
+	if Propre("maison\x1b[2J\x1b[Hsigné") != "maison?[2J?[Hsigné" {
+		t.Fatal("les séquences de terminal doivent être neutralisées")
 	}
 }

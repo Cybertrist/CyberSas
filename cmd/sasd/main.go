@@ -1,10 +1,10 @@
 // sasd : le serveur CyberSas.
 //
 //	sasd                               fait tourner le serveur
-//	sasd cle --etiquette maison        clé d'inscription pour une machine
+//	sasd cle --etiquette maison [--nom maison]  clé d'inscription pour une machine
 //	sasd cle --utilisateur a@b.fr      clé pour l'appareil d'une personne, sans Google
 //	sasd appareils [--json]            les appareils inscrits
-//	sasd signatures < signatures.json  importe les signatures du verrou
+//	sasd signatures < certificats.json importe les certificats signés par le verrou
 //	sasd retirer <nom>                 coupe un appareil
 //
 // La configuration vient de l'environnement, voir config().
@@ -18,6 +18,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -31,8 +32,10 @@ import (
 	"time"
 
 	"github.com/Cybertrist/CyberSas/internal/base"
+	"github.com/Cybertrist/CyberSas/internal/client"
 	"github.com/Cybertrist/CyberSas/internal/dns"
 	"github.com/Cybertrist/CyberSas/internal/noise"
+	"github.com/Cybertrist/CyberSas/internal/politique"
 	"github.com/Cybertrist/CyberSas/internal/protocole"
 	"github.com/Cybertrist/CyberSas/internal/serveur"
 	"github.com/Cybertrist/CyberSas/internal/tun"
@@ -60,16 +63,18 @@ func config() reglages {
 	fmt.Sscan(env("SAS_PORT", "51820"), &port)
 	return reglages{
 		Config: serveur.Config{
-			Domaine:       domaine,
-			Point:         env("SAS_POINT", fmt.Sprintf("vpn.%s:%d", domaine, port)),
-			Reseau:        reseau,
-			Serveur:       reseau.Masked().Addr().Next(),
-			Interface:     env("SAS_INTERFACE", "sas0"),
-			Equipe:        env("SAS_EQUIPE", "/config/equipe.txt"),
-			Politique:     env("SAS_POLITIQUE", "/config/politique.json"),
-			ClientsGoogle: env("SAS_CLIENTS_GOOGLE", "/config/clients_google"),
-			Verrou:        env("SAS_VERROU", "/config/verrou.pub"),
-			DureeAppareil: 30 * 24 * time.Hour,
+			Domaine:            domaine,
+			Point:              env("SAS_POINT", fmt.Sprintf("vpn.%s:%d", domaine, port)),
+			Reseau:             reseau,
+			Serveur:            reseau.Masked().Addr().Next(),
+			Interface:          env("SAS_INTERFACE", "sas0"),
+			Equipe:             env("SAS_EQUIPE", "/config/equipe.txt"),
+			Politique:          env("SAS_POLITIQUE", "/politique/politique.json"),
+			SignaturePolitique: env("SAS_SIGNATURE_POLITIQUE", "/politique/politique.sig"),
+			Revocations:        env("SAS_REVOCATIONS", "/config/revocations.json"),
+			ClientsGoogle:      env("SAS_CLIENTS_GOOGLE", "/config/clients_google"),
+			Verrou:             env("SAS_VERROU", "/config/verrou.pub"),
+			DureeAppareil:      30 * 24 * time.Hour,
 		},
 		etat:   env("SAS_ETAT", "/var/lib/sasd"),
 		ecoute: env("SAS_ECOUTE", "127.0.0.1:8080"),
@@ -93,7 +98,7 @@ func main() {
 		case "cle":
 			cmdCle(b, os.Args[2:])
 		case "appareils":
-			cmdAppareils(b, os.Args[2:])
+			cmdAppareils(b, cfg, os.Args[2:])
 		case "signatures":
 			cmdSignatures(b, cfg)
 		case "retirer":
@@ -117,22 +122,26 @@ func main() {
 func cmdCle(b *base.Base, args []string) {
 	f := flag.NewFlagSet("cle", flag.ExitOnError)
 	etiquette := f.String("etiquette", "", "étiquette de la machine (maison, nas…)")
+	nom := f.String("nom", "", "nom de la machine dans le VPN (par défaut, son étiquette)")
 	utilisateur := f.String("utilisateur", "", "adresse de la personne à qui appartient l'appareil")
 	duree := f.Duration("duree", 10*time.Minute, "durée de validité")
 	f.Parse(args)
 	if (*etiquette == "") == (*utilisateur == "") {
 		meurt("il faut --etiquette ou --utilisateur, pas les deux")
 	}
+	if *nom != "" && *etiquette == "" {
+		meurt("--nom ne vaut que pour une machine : un appareil personnel porte le nom de son propriétaire")
+	}
 	brut := make([]byte, 24)
 	rand.Read(brut)
 	cle := "sas-" + base64.RawURLEncoding.EncodeToString(brut)
-	if err := b.CreerCle(cle, *etiquette, *utilisateur, time.Now().Add(*duree)); err != nil {
+	if err := b.CreerCle(cle, *etiquette, *utilisateur, *nom, time.Now().Add(*duree)); err != nil {
 		meurt("%v", err)
 	}
 	fmt.Println(cle)
 }
 
-func cmdAppareils(b *base.Base, args []string) {
+func cmdAppareils(b *base.Base, cfg reglages, args []string) {
 	f := flag.NewFlagSet("appareils", flag.ExitOnError)
 	enJSON := f.Bool("json", false, "sortie JSON, pour sas verrou signer")
 	f.Parse(args)
@@ -140,11 +149,15 @@ func cmdAppareils(b *base.Base, args []string) {
 	if err != nil {
 		meurt("%v", err)
 	}
+	equipe, _ := politique.ChargerEquipe(cfg.Equipe)
 	if *enJSON {
+		// Le groupe est celui de l'équipe aujourd'hui : c'est lui que l'admin
+		// signera, et qu'il voit avant de signer.
 		var r []protocole.Appareil
 		for _, a := range liste {
 			p := protocole.Appareil{Numero: uint32(a.ID), Nom: a.Nom, Adresse: a.Adresse.String(), ClePublique: a.ClePublique,
-				Proprietaire: a.Proprietaire, Etiquette: a.Etiquette, Systeme: a.Systeme}
+				Proprietaire: a.Proprietaire, Etiquette: a.Etiquette, Systeme: a.Systeme, Groupe: equipe[a.Proprietaire],
+				SignatureExpire: a.SignatureExpire}
 			if len(a.Signature) > 0 {
 				p.Signature = base64.StdEncoding.EncodeToString(a.Signature)
 			}
@@ -154,20 +167,21 @@ func cmdAppareils(b *base.Base, args []string) {
 		return
 	}
 	t := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(t, "NOM\tADRESSE\tPROPRIÉTAIRE\tÉTIQUETTE\tSYSTÈME\tSIGNÉ\tVU LE")
+	fmt.Fprintln(t, "NOM\tADRESSE\tPROPRIÉTAIRE\tÉTIQUETTE\tEMPREINTE\tCERTIFICAT\tVU LE")
 	for _, a := range liste {
-		signe := "non"
+		cert := "aucun"
 		if len(a.Signature) > 0 {
-			signe = "oui"
+			cert = "jusqu'au " + a.SignatureExpire.Format("02/01/2006")
 		}
-		fmt.Fprintf(t, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Nom, a.Adresse, tiret(a.Proprietaire), tiret(a.Etiquette), tiret(a.Systeme), signe, a.Vu.Format("02/01 15:04"))
+		fmt.Fprintf(t, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Nom, a.Adresse, tiret(a.Proprietaire), tiret(a.Etiquette),
+			client.EmpreinteCle(a.ClePublique), cert, a.Vu.Format("02/01 15:04"))
 	}
 	t.Flush()
 }
 
-// cmdSignatures lit sur l'entrée les signatures produites par
-// « sas verrou signer », les vérifie avec la clé publique du verrou, et
-// enregistre celles qui tiennent.
+// cmdSignatures lit sur l'entrée les certificats produits par
+// « sas verrou signer », les vérifie avec la clé publique du verrou et
+// avec la fiche de chaque appareil, et enregistre ceux qui tiennent.
 func cmdSignatures(b *base.Base, cfg reglages) {
 	texte, err := os.ReadFile(cfg.Verrou)
 	if err != nil {
@@ -178,19 +192,18 @@ func cmdSignatures(b *base.Base, cfg reglages) {
 		meurt("%v", err)
 	}
 	var liste []protocole.Appareil
-	if err := json.NewDecoder(os.Stdin).Decode(&liste); err != nil {
+	if err := json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&liste); err != nil {
 		meurt("entrée illisible : %v", err)
 	}
-	ok, refus := serveur.ImporterSignatures(b, cle, liste)
-	fmt.Printf("%d signature(s) enregistrée(s)\n", ok)
+	ok, refus := serveur.ImporterCertificats(b, cle, liste)
+	fmt.Printf("%d certificat(s) enregistré(s)\n", ok)
 	for _, n := range refus {
-		fmt.Printf("refusée : %s (signature fausse, ou clé et adresse qui ne correspondent plus)\n", n)
+		fmt.Printf("refusé : %s (signature fausse ou périmée, ou fiche qui ne correspond plus)\n", client.Propre(n))
 	}
 	if len(refus) > 0 {
 		os.Exit(1)
 	}
 }
-
 func tiret(s string) string {
 	if s == "" {
 		return "-"
@@ -251,7 +264,7 @@ func servir(cfg reglages) error {
 	// appareils ont le droit de se parler. Le serveur est créé juste après,
 	// avant que le moteur ne tourne.
 	var srv *serveur.Serveur
-	moteur := tunnel.Nouveau(tunnel.Config{Prive: prive, Tun: iface, Conn: conn,
+	moteur := tunnel.Nouveau(tunnel.Config{Prive: prive, Tun: iface, Conn: conn, Adresse: cfg.Serveur,
 		Journal: journal.With("composant", "tunnel"),
 		Relais:  func(de, vers uint32) bool { return srv.Relie(de, vers) }})
 
@@ -274,7 +287,8 @@ func servir(cfg reglages) error {
 	}()
 	go srv.Boucle(ctx)
 
-	api := &http.Server{Addr: cfg.ecoute, Handler: srv.Routes(), ReadHeaderTimeout: 10 * time.Second}
+	api := &http.Server{Addr: cfg.ecoute, Handler: srv.Routes(), ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		<-ctx.Done()
 		api.Close()

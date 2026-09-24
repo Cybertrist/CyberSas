@@ -128,25 +128,14 @@ func lireCookie(msg []byte, cles clesMac, dernierMac1 [tailleMac]byte) ([tailleM
 	return c, nil
 }
 
-// charge : combien de poignées de main le serveur traite par seconde, et
-// combien il en accepte de chaque adresse une fois sous charge.
+// charge : combien de poignées de main le serveur traite par seconde.
 type charge struct {
 	mu      sync.Mutex
 	seuil   int
 	seconde time.Time
 	compte  int
-	seaux   map[netip.Addr]*seau
+	parIP   limiteur[netip.Prefix]
 }
-
-type seau struct {
-	jetons float64
-	vu     time.Time
-}
-
-const (
-	jetonsParSeconde = 10
-	jetonsMax        = 20
-)
 
 // sousCharge compte une poignée de main de plus, et dit si le seuil de la
 // seconde en cours est dépassé.
@@ -161,23 +150,56 @@ func (c *charge) sousCharge() bool {
 	return c.compte > c.seuil
 }
 
-// autoriser : un seau de jetons par adresse. Une adresse qui a prouvé la
-// possession de son IP (mac2 valide) garde droit à dix poignées de main
-// par seconde, pas plus.
+// autoriser : une adresse qui a prouvé la possession de son IP (mac2 valide)
+// garde droit à dix poignées de main par seconde. Le seau est celui de son
+// réseau, /32 en IPv4 et /64 en IPv6 : qui possède un /64 possède des
+// milliards d'adresses, il ne doit pas avoir autant de seaux.
 func (c *charge) autoriser(a netip.Addr) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	now := time.Now()
-	if c.seaux == nil {
-		c.seaux = map[netip.Addr]*seau{}
+	a = a.Unmap()
+	bits := 32
+	if a.Is6() {
+		bits = 64
 	}
-	s := c.seaux[a]
+	p, _ := a.Prefix(bits)
+	return c.parIP.autoriser(p)
+}
+
+// limiteur : un seau de jetons par clé, dix par seconde, vingt d'avance.
+// La table est bornée ; pleine, elle oublie d'abord les seaux inactifs
+// depuis plus d'une seconde, qui sont de toute façon pleins.
+type limiteur[K comparable] struct {
+	mu    sync.Mutex
+	seaux map[K]*seau
+}
+
+type seau struct {
+	jetons float64
+	vu     time.Time
+}
+
+const (
+	jetonsParSeconde = 10
+	jetonsMax        = 20
+	maxSeaux         = 100000
+)
+
+func (l *limiteur[K]) autoriser(cle K) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	if l.seaux == nil {
+		l.seaux = map[K]*seau{}
+	}
+	s := l.seaux[cle]
 	if s == nil {
-		if len(c.seaux) > 100000 {
-			return false
+		if len(l.seaux) >= maxSeaux {
+			l.oublier(now, time.Second)
+			if len(l.seaux) >= maxSeaux {
+				return false
+			}
 		}
 		s = &seau{jetons: jetonsMax, vu: now}
-		c.seaux[a] = s
+		l.seaux[cle] = s
 	}
 	s.jetons = min(jetonsMax, s.jetons+now.Sub(s.vu).Seconds()*jetonsParSeconde)
 	s.vu = now
@@ -188,12 +210,17 @@ func (c *charge) autoriser(a netip.Addr) bool {
 	return true
 }
 
-func (c *charge) nettoyer() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for a, s := range c.seaux {
-		if time.Since(s.vu) > time.Minute {
-			delete(c.seaux, a)
+// oublier les seaux inactifs depuis ce délai. Appelée avec l.mu tenu.
+func (l *limiteur[K]) oublier(now time.Time, inactif time.Duration) {
+	for k, s := range l.seaux {
+		if now.Sub(s.vu) > inactif {
+			delete(l.seaux, k)
 		}
 	}
+}
+
+func (l *limiteur[K]) nettoyer() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.oublier(time.Now(), time.Minute)
 }

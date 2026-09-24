@@ -4,20 +4,22 @@ Ce que CyberSas protège, contre qui, et ce qu'il ne promet pas.
 
 ## Ce qu'on protège
 
+- **Le contenu des échanges** entre appareils : personne sur le chemin ne doit
+  pouvoir le lire, **pas même le serveur**.
 - **Les services de la maison**, qui ne doivent être joignables que par les
-  personnes autorisées.
+  appareils autorisés, et seulement sur les ports autorisés.
 - **L'adresse IP de la maison**, qui ne doit apparaître nulle part.
-- **L'accès de l'équipe.** Un mot de passe volé ne doit pas suffire.
-- **Le trafic des appareils**, qui ne doit être lisible par personne sur le
-  chemin : le Wi-Fi d'un café, un opérateur, l'hébergeur du VPS.
+- **L'accès de l'équipe** : un mot de passe volé, une clé publique connue ou un
+  serveur piraté ne doivent pas suffire à entrer ou à s'intercaler.
 
 ## Ce qui est exposé
 
 Sur Internet :
 
 - le port **UDP 51820**, celui du tunnel. Il ne répond qu'à une initiation
-  valide, venant d'une clé inscrite. À tout le reste, il ne répond rien : un
-  scan ne voit qu'un port muet ;
+  portant un mac1 valide, donc calculé avec la clé publique du serveur, que
+  seuls les appareils inscrits connaissent, et venant d'une clé inscrite. À
+  tout le reste, il ne répond rien : un scan ne voit qu'un port muet ;
 - le port **443**, pour trois noms : `vpn.` (l'API d'inscription), `auth.` (la
   connexion Google des pages web) et `maison.` (un service publié) ;
 - le port 80, qui ne fait que rediriger.
@@ -27,62 +29,87 @@ n'écoute que sur 127.0.0.1 : on ne l'atteint qu'à travers Nginx.
 
 ## Contre qui
 
-**Quelqu'un qui écoute le réseau.** Il voit des paquets UDP chiffrés et leur
-taille, arrondie à 16 octets. Ni le contenu, ni les adresses internes, ni
-l'identité de l'appareil : la clé statique du client voyage chiffrée.
+**Quelqu'un qui écoute le réseau** (Wi-Fi d'un café, opérateur). Il voit des
+paquets UDP chiffrés, leur taille arrondie à 16 octets, et les adresses IP
+publiques. Ni le contenu, ni les adresses internes, ni l'identité de
+l'appareil : sa clé statique voyage chiffrée.
+
+**L'hébergeur du VPS, ou quiconque lit la mémoire du serveur.** Il voit qui
+parle à qui, quand, et combien. Il ne voit pas ce qui se dit : entre deux
+appareils, le serveur ne relaie que des messages chiffrés avec une clé qu'il
+n'a pas. Le labo le vérifie par une capture réseau sur le serveur lui-même.
 
 **Quelqu'un qui rejoue ou modifie des paquets.** Un paquet modifié échoue à la
-vérification de son tag. Un paquet rejoué porte un compteur déjà vu. Une
-initiation rejouée porte un horodatage trop ancien. Les trois sont rejetés en
-silence. Voir [`protocole.md`](protocole.md).
+vérification de son tag. Un paquet rejoué porte un compteur déjà vu, une
+initiation rejouée un horodatage trop ancien. Tous sont rejetés en silence.
+
+**Quelqu'un qui inonde le serveur de poignées de main.** Sans la clé publique
+du serveur, ses messages sont jetés au premier hachage. Avec, et sous charge, il
+doit prouver qu'il reçoit les paquets envoyés à son adresse (le cookie), puis
+se limiter à dix poignées de main par seconde.
 
 **Quelqu'un qui veut entrer sans y être invité.** Il lui faut un jeton Google
-émis pour notre application, pour une adresse vérifiée par Google et présente
-dans la liste de l'équipe. Ou une clé d'inscription, qui expire en dix minutes
-et ne sert qu'une fois. L'API d'inscription est limitée à dix tentatives par
-minute et par adresse.
+émis pour notre application, pour une adresse vérifiée et présente dans la
+liste de l'équipe, ou une clé d'inscription qui expire en dix minutes et ne
+sert qu'une fois. Et dans les deux cas, prouver qu'il détient la clé privée
+qu'il inscrit.
+
+**Quelqu'un qui veut s'approprier l'appareil d'un autre.** Les clés publiques
+circulent, mais inscrire une clé demande de prouver qu'on détient sa moitié
+privée. Et une clé inscrite ne change jamais de propriétaire.
 
 **Un membre de l'équipe qui va trop loin**, volontairement ou parce que son
-appareil est compromis. Le pare-feu du serveur ferme tout par défaut : il
-n'atteint que ce que son groupe autorise. Il ne peut pas usurper l'adresse d'un
-autre appareil, le tunnel vérifie la source de chaque paquet. Le retirer de la
-liste coupe ses appareils en cinq secondes.
+appareil est compromis. Il n'atteint que ce que la politique autorise : le
+serveur ne relaie pas vers les appareils sans relation avec lui, et ceux qui en
+ont filtrent eux-mêmes ce qui entre. Il ne peut pas usurper l'adresse d'un autre
+appareil. Le retirer de la liste coupe ses appareils en cinq secondes.
 
 **Un service de la maison compromis.** Il ne peut se retourner vers aucun
-appareil : aucune règle ne part de `etiquette:maison`.
+appareil : aucune règle ne part de `etiquette:maison`, et les appareils
+refusent ce qu'il tenterait d'ouvrir chez eux.
 
-## Ce que CyberSas ne promet pas
-
-**Le protocole n'est pas audité.** Il reprend l'architecture de WireGuard et
-ses primitives sont standard. Ses tests prouvent qu'il suit la spécification
-Noise et refuse les attaques connues. Mais un protocole maison, c'est du code
-que personne d'autre n'a relu. Pour des données vraiment sensibles, WireGuard
-reste le choix raisonnable.
-
-**Le serveur voit le trafic entre appareils.** Chaque appareil n'a de session
-qu'avec le serveur. Un paquet du poste vers la maison est déchiffré sur le VPS,
-passe le pare-feu, puis est rechiffré pour la maison. L'hébergeur du VPS, ou
-quiconque le compromet, peut donc lire ce trafic. C'est le prix d'une
-architecture en étoile, et aussi ce qui permet d'appliquer les règles d'accès
-au centre, là où un appareil ne peut pas les contourner. Chiffrer de bout en
-bout sur ce trafic, avec TLS ou SSH dans le tunnel, reste une bonne habitude.
-
-**Pas de protection contre l'inondation de poignées de main.** Chaque
-initiation, même fausse, coûte un calcul au serveur avant d'être rejetée.
-
-**Google devient un tiers de confiance.** S'il est en panne, personne ne peut
-s'inscrire. Les appareils déjà inscrits continuent de fonctionner : le tunnel
-ne se fie qu'aux clés. Un compte Google volé permet d'inscrire un appareil : le
-second facteur du compte limite ce risque, mais CyberSas ne peut pas l'imposer.
+**Un serveur piraté.** C'est le cas le plus grave, voir plus bas.
 
 ## Si le VPS tombe aux mains d'un attaquant
 
-- Il lit le trafic qui traverse le serveur, comme expliqué plus haut.
-- Il peut inscrire ses propres appareils et modifier la politique.
-- Il récupère la clé privée du serveur et peut se faire passer pour lui. Il
-  faut alors en générer une nouvelle, ce qui oblige tous les appareils à se
-  réinscrire.
-- Il récupère le secret du client Google, qui ne donne accès à aucun compte
-  mais doit être régénéré dans la console Google Cloud.
-- Il ne récupère aucune clé privée d'appareil : elles n'ont jamais quitté les
-  appareils.
+Grâce au bout en bout et au verrou, bien moins qu'avant :
+
+- Il **ne lit pas** le trafic entre appareils.
+- Il **ne peut pas s'intercaler** entre deux appareils : pour se faire passer
+  pour l'un d'eux, il lui faudrait une clé signée par le verrou, dont la clé
+  privée n'a jamais touché le serveur. Les appareils refusent aussi tout
+  changement de la clé du serveur ou du verrou.
+- Il peut **inscrire ses propres appareils**, mais sans signature, les autres
+  les refusent.
+- Il peut **couper** le réseau : ne plus relayer, ou modifier la politique pour
+  retirer des relations. Un serveur a toujours ce pouvoir-là.
+- Il **lit en clair** ce qui s'adresse au serveur lui-même : le DNS du réseau,
+  et les pages publiées par Nginx sur `maison.`, puisque le TLS se termine sur
+  le VPS. Pour ces pages, passer par le VPN plutôt que par la page publique
+  garde le chiffrement de bout en bout.
+- Il récupère la clé privée du serveur et le secret du client Google. Il faut
+  alors les régénérer, et réinscrire les appareils.
+
+## Ce que CyberSas ne promet pas
+
+**Le protocole n'est pas audité par un expert humain.** Il reprend
+l'architecture de WireGuard, ses primitives sont standard, sa poignée de main
+correspond octet pour octet aux vecteurs officiels de Noise, des millions de
+messages forgés n'ont rien produit, et des relecteurs indépendants l'ont passé
+au crible ([`audit.md`](audit.md)). Mais un protocole maison reste du code que
+peu de gens ont lu. Pour des données dont la fuite serait grave, WireGuard reste
+le choix raisonnable.
+
+**Les métadonnées restent visibles du serveur** : qui parle à qui, quand, et
+combien.
+
+**Google devient un tiers de confiance** pour les inscriptions. S'il est en
+panne, personne ne peut s'inscrire, mais les appareils déjà inscrits continuent
+de fonctionner : le tunnel ne se fie qu'aux clés. Un compte Google volé permet
+d'inscrire un appareil ; avec le verrou, cet appareil reste inutile tant que
+l'admin ne l'a pas signé.
+
+**Le premier contact.** Un appareil à qui l'on ne donne pas la clé du verrou
+d'avance retient la première qu'on lui annonce. Si ce premier contact est
+détourné, il retiendra la mauvaise. Donner la clé d'avance (`--verrou`) ferme
+ce risque ; l'empreinte affichée permet de vérifier après coup.

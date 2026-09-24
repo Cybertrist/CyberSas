@@ -1,9 +1,15 @@
 # Le labo : ce qui, en vrai, ne tournerait pas sur le VPS.
 #
 # maison joue le serveur à la maison. Il n'a aucun port publié : il sort
-# vers le VPS par notre tunnel, et c'est tout. Le service de démonstration,
-# whoami, vit dans son espace réseau et répond sur maison.sas.internal:80.
-# demo-admin fait de même sur le port 8080.
+# vers le VPS par notre tunnel, et c'est tout. Trois services de
+# démonstration vivent dans son espace réseau :
+#
+#   demo         port 80, ouvert à l'équipe directement par le VPN
+#   demo-publie  port 8081, ouvert au serveur seul : c'est lui que Nginx
+#                publie sur maison.DOMAINE, derrière la connexion Google.
+#                Un service ne doit croire les en-têtes X-Email et X-User
+#                que sur ce port-là, que personne d'autre ne peut joindre.
+#   demo-admin   port 8080, que la politique n'ouvre à personne de l'équipe
 #
 # poste joue l'ordinateur d'un membre de l'équipe, pour vérifier que les
 # règles d'accès laissent passer ce qu'elles doivent, et rien d'autre.
@@ -17,11 +23,19 @@ x-noeud: &noeud
   image: cybersas:dev
   restart: unless-stopped
   command: ["sas", "demon"]
+  cap_drop: [ALL]
   cap_add: [NET_ADMIN]
+  security_opt: ["no-new-privileges:true"]
   devices: ["/dev/net/tun:/dev/net/tun"]
   environment:
     SAS_CA: /ca/cybersas-ca.pem
   networks: [public]
+
+x-demo: &demo
+  image: traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44
+  restart: unless-stopped
+  network_mode: service:maison
+  depends_on: [maison]
 
 services:
   maison:
@@ -32,19 +46,15 @@ services:
       - ../etat/ca/public:/ca:ro
 
   demo:
-    image: traefik/whoami:v1.12.0
-    restart: unless-stopped
-    network_mode: service:maison
-    depends_on: [maison]
+    <<: *demo
 
-  # Un second service, sur 8080, que la politique ne donne pas à l'équipe :
-  # l'essai vérifie qu'elle s'y cogne.
+  demo-publie:
+    <<: *demo
+    command: ["--port", "8081"]
+
   demo-admin:
-    image: traefik/whoami:v1.12.0
-    restart: unless-stopped
+    <<: *demo
     command: ["--port", "8080"]
-    network_mode: service:maison
-    depends_on: [maison]
 
   poste:
     <<: *noeud

@@ -210,19 +210,25 @@ func (i *Initiateur) LireMessage2(m []byte) ([]byte, Cles, error) {
 	if !i.envoye || len(m) < TailleMsg2+tailleTag {
 		return nil, Cles{}, ErrMessage
 	}
+	// On travaille sur une copie de l'état, qui ne remplace l'original
+	// qu'en cas de succès. Sinon, une seule réponse forgée (il suffit de
+	// connaître notre clé publique et l'indice, qui passe en clair)
+	// corromprait l'état et ferait échouer la vraie réponse qui suit.
+	es := i.es
 	re := m[:TailleCle]
-	i.es.melangerHachage(re)
+	es.melangerHachage(re)
 	for _, p := range []*ecdh.PrivateKey{i.e, i.s} { // ee, puis se
 		secret, err := dh(p, re)
 		if err != nil {
 			return nil, Cles{}, ErrMessage
 		}
-		i.es.melangerCle(secret)
+		es.melangerCle(secret)
 	}
-	charge, err := i.es.dechiffrerEtHacher(m[TailleCle:])
+	charge, err := es.dechiffrerEtHacher(m[TailleCle:])
 	if err != nil {
 		return nil, Cles{}, err
 	}
+	i.es = es
 	aller, retour := i.es.separer()
 	return charge, Cles{Envoi: aller, Reception: retour}, nil
 }

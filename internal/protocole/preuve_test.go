@@ -3,6 +3,7 @@ package protocole
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"encoding/base64"
 	"testing"
 	"time"
 )
@@ -12,26 +13,55 @@ func TestPreuve(t *testing.T) {
 	appareil, _ := ecdh.X25519().GenerateKey(rand.Reader)
 	voleur, _ := ecdh.X25519().GenerateKey(rand.Reader)
 	now := time.Now()
-	h := now.Unix()
+	pub := appareil.PublicKey().Bytes()
 
-	p, err := Prouver(appareil, serveur.PublicKey().Bytes(), h)
-	if err != nil {
+	d := DemandeConnexion{JetonGoogle: "jeton-de-la-victime", Nom: "portable", Systeme: "android",
+		ClePublique: base64.StdEncoding.EncodeToString(pub), Horodatage: now.Unix()}
+	if err := d.Prouver(appareil, serveur.PublicKey().Bytes()); err != nil {
 		t.Fatal(err)
 	}
-	if !VerifierPreuve(serveur, appareil.PublicKey().Bytes(), h, p, now) {
+	if !d.VerifierPreuve(serveur, pub, now) {
 		t.Fatal("preuve valide refusée")
 	}
+
 	// Le voleur connaît la clé publique de l'appareil, pas sa clé privée.
-	faux, _ := Prouver(voleur, serveur.PublicKey().Bytes(), h)
-	if VerifierPreuve(serveur, appareil.PublicKey().Bytes(), h, faux, now) {
+	faux := d
+	faux.Prouver(voleur, serveur.PublicKey().Bytes())
+	if faux.VerifierPreuve(serveur, pub, now) {
 		t.Fatal("une preuve faite avec une autre clé est acceptée")
 	}
-	// Une preuve trop vieille ne sert plus.
-	if VerifierPreuve(serveur, appareil.PublicKey().Bytes(), h, p, now.Add(FenetrePreuve+time.Second)) {
+	// La preuve de la victime, recollée à un autre justificatif, un autre
+	// nom ou un autre horodatage, ne vaut plus rien.
+	for nom, modif := range map[string]func(*DemandeConnexion){
+		"justificatif": func(x *DemandeConnexion) { x.JetonGoogle = "jeton-de-l-attaquant" },
+		"clé":          func(x *DemandeConnexion) { x.JetonGoogle, x.CleInscription = "", "sas-cle" },
+		"nom":          func(x *DemandeConnexion) { x.Nom = "autre" },
+		"système":      func(x *DemandeConnexion) { x.Systeme = "linux" },
+		"horodatage":   func(x *DemandeConnexion) { x.Horodatage++ },
+	} {
+		x := d
+		modif(&x)
+		if x.VerifierPreuve(serveur, pub, now) {
+			t.Errorf("preuve toujours valide après changement de : %s", nom)
+		}
+	}
+	// Périmée.
+	if d.VerifierPreuve(serveur, pub, now.Add(FenetrePreuve+time.Second)) {
 		t.Fatal("une preuve périmée est acceptée")
 	}
-	// Changer l'horodatage casse le code.
-	if VerifierPreuve(serveur, appareil.PublicKey().Bytes(), h+1, p, now) {
-		t.Fatal("une preuve est acceptée avec un autre horodatage")
+}
+
+func TestRejeux(t *testing.T) {
+	var r Rejeux
+	now := time.Now()
+	if r.DejaVue("p", now) {
+		t.Fatal("preuve jamais vue signalée comme vue")
+	}
+	r.Retenir("p", now)
+	if !r.DejaVue("p", now.Add(time.Minute)) {
+		t.Fatal("une preuve rejouée dans la fenêtre doit être reconnue")
+	}
+	if r.DejaVue("p", now.Add(3*FenetrePreuve)) {
+		t.Fatal("après la fenêtre, l'horodatage suffit à refuser : la preuve peut être oubliée")
 	}
 }

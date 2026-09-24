@@ -4,26 +4,30 @@
 //
 // Trois choses :
 //   - s'inscrire, en prouvant qu'on détient sa clé privée ;
-//   - traduire l'état du réseau, donné par le serveur, en pairs pour le
-//     moteur du tunnel ;
+//   - traduire l'état du réseau, donné par le serveur, en pairs et en règles
+//     pour le moteur du tunnel ;
 //   - ne croire le serveur que sur ce qu'il ne peut pas falsifier : sa
-//     propre clé, retenue à l'inscription, et les signatures du verrou.
+//     propre clé, retenue à l'inscription, et, quand le réseau a un verrou,
+//     ce que l'admin a signé.
 package client
 
 import (
 	"bytes"
 	"crypto/ecdh"
-	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/netip"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Cybertrist/CyberSas/internal/politique"
 	"github.com/Cybertrist/CyberSas/internal/protocole"
@@ -34,14 +38,25 @@ import (
 // ErrDesinscrit : le serveur ne connaît plus cet appareil (retiré, expiré).
 var ErrDesinscrit = errors.New("appareil désinscrit")
 
-// API : le client HTTPS de l'API. AutoriteEnPlus ajoute une autorité de
-// certification aux racines du système, celle du labo par exemple.
+// tailleMaxReponse : un serveur hostile ne doit pas pouvoir saturer la
+// mémoire du client avec une réponse sans fin.
+const tailleMaxReponse = 1 << 20
+
+// API : le client HTTPS de l'API.
 type API struct {
 	Base string
 	http *http.Client
 }
 
+// NouvelleAPI refuse tout ce qui n'est pas https : la clé d'inscription et
+// la clé du serveur ne doivent jamais voyager en clair. autoriteEnPlus
+// ajoute une autorité de certification aux racines du système, celle du
+// labo par exemple.
 func NouvelleAPI(base string, autoriteEnPlus []byte) (*API, error) {
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, errors.New("l'adresse du serveur doit commencer par https://")
+	}
 	racines, _ := x509.SystemCertPool()
 	if racines == nil {
 		racines = x509.NewCertPool()
@@ -50,7 +65,10 @@ func NouvelleAPI(base string, autoriteEnPlus []byte) (*API, error) {
 		return nil, errors.New("autorité de certification illisible")
 	}
 	return &API{Base: strings.TrimRight(base, "/"), http: &http.Client{Timeout: 20 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: racines, MinVersion: tls.VersionTLS12}}}}, nil
+		// Une redirection pourrait emporter le jeton ailleurs : on n'en
+		// suit aucune, l'API n'en fait jamais.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport:     &http.Transport{TLSClientConfig: &tls.Config{RootCAs: racines, MinVersion: tls.VersionTLS12}}}}, nil
 }
 
 func (a *API) Appel(methode, chemin, jeton string, corps, reponse any) error {
@@ -71,18 +89,30 @@ func (a *API) Appel(methode, chemin, jeton string, corps, reponse any) error {
 		return err
 	}
 	defer rep.Body.Close()
+	corpsLu := io.LimitReader(rep.Body, tailleMaxReponse)
 	if rep.StatusCode == http.StatusUnauthorized && jeton != "" {
 		return ErrDesinscrit
 	}
 	if rep.StatusCode != http.StatusOK {
 		var e protocole.Erreur
-		json.NewDecoder(rep.Body).Decode(&e)
-		return fmt.Errorf("%s (%d)", e.Erreur, rep.StatusCode)
+		json.NewDecoder(corpsLu).Decode(&e)
+		return fmt.Errorf("%s (%d)", Propre(e.Erreur), rep.StatusCode)
 	}
 	if reponse != nil {
-		return json.NewDecoder(rep.Body).Decode(reponse)
+		return json.NewDecoder(corpsLu).Decode(reponse)
 	}
 	return nil
+}
+
+// Propre : un texte venu du serveur, prêt à afficher. Sans caractère de
+// contrôle, un serveur hostile ne peut pas maquiller un terminal.
+func Propre(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) {
+			return r
+		}
+		return '?'
+	}, s)
 }
 
 // Justificatif : un jeton Google, ou une clé d'inscription.
@@ -93,7 +123,7 @@ type Justificatif struct {
 // Inscrire : demande la clé du serveur, calcule la preuve de possession,
 // puis s'inscrit. Si verrouAttendu est donné, l'inscription échoue si le
 // serveur annonce un autre verrou : c'est ainsi qu'un admin prudent
-// installe un appareil, en lui donnant l'empreinte du verrou d'avance.
+// installe un appareil, en lui donnant la clé du verrou d'avance.
 func (a *API) Inscrire(prive *ecdh.PrivateKey, nom, systeme string, j Justificatif, verrouAttendu string) (protocole.ReponseConnexion, error) {
 	var r protocole.ReponseConnexion
 	var srv protocole.Serveur
@@ -104,23 +134,22 @@ func (a *API) Inscrire(prive *ecdh.PrivateKey, nom, systeme string, j Justificat
 	if err != nil || len(cleServeur) != 32 {
 		return r, errors.New("clé du serveur invalide")
 	}
-	h := time.Now().Unix()
-	preuve, err := protocole.Prouver(prive, cleServeur, h)
-	if err != nil {
+	d := protocole.DemandeConnexion{JetonGoogle: j.JetonGoogle, CleInscription: j.CleInscription, Nom: nom, Systeme: systeme,
+		ClePublique: base64.StdEncoding.EncodeToString(prive.PublicKey().Bytes()), Horodatage: time.Now().Unix()}
+	if err := d.Prouver(prive, cleServeur); err != nil {
 		return r, err
 	}
-	d := protocole.DemandeConnexion{JetonGoogle: j.JetonGoogle, CleInscription: j.CleInscription, Nom: nom, Systeme: systeme,
-		ClePublique: base64.StdEncoding.EncodeToString(prive.PublicKey().Bytes()), Horodatage: h, Preuve: preuve}
 	if err := a.Appel("POST", protocole.CheminConnexion, "", d, &r); err != nil {
 		return r, err
 	}
-	// La réponse doit parler de la clé que l'on vient d'utiliser : sinon,
-	// quelqu'un s'est glissé entre la demande de clé et l'inscription.
+	// La réponse doit parler de la clé que l'on vient d'utiliser pour la
+	// preuve : sinon, le serveur a changé en cours de route.
 	if r.Serveur.ClePublique != srv.ClePublique {
 		return r, errors.New("le serveur a changé de clé pendant l'inscription")
 	}
 	if verrouAttendu != "" && r.Verrou != verrouAttendu {
-		return r, fmt.Errorf("le serveur annonce un autre verrou que celui attendu (%s)", EmpreinteVerrou(r.Verrou))
+		return r, fmt.Errorf("le serveur annonce un autre verrou (%s) que celui attendu (%s)",
+			EmpreinteVerrou(r.Verrou), EmpreinteVerrou(verrouAttendu))
 	}
 	return r, nil
 }
@@ -136,75 +165,226 @@ func EmpreinteVerrou(b64 string) string {
 	return verrou.Empreinte(pub)
 }
 
-// Ecarte : un pair que le serveur annonce, mais que ce client refuse.
+// EmpreinteCle : l'empreinte d'une clé d'appareil, que l'admin compare avec
+// celle affichée par l'appareil lui-même avant de le signer.
+func EmpreinteCle(b64 string) string {
+	b, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return "illisible"
+	}
+	return verrou.Empreinte(b)
+}
+
+// Retenu : ce que l'appareil a appris et ne laisse plus changer. Le client
+// le garde sur disque, et Construire le met à jour.
+type Retenu struct {
+	CleServeur string       `json:"cle_serveur"`
+	Verrou     string       `json:"verrou,omitempty"`
+	MaCle      string       `json:"ma_cle"`
+	Moi        netip.Addr   `json:"moi"`
+	Reseau     netip.Prefix `json:"reseau"`
+	// Plus hautes versions signées déjà vues : jamais de retour en arrière.
+	VersionPolitique   uint64   `json:"version_politique,omitempty"`
+	VersionRevocations uint64   `json:"version_revocations,omitempty"`
+	Revoquees          []string `json:"revoquees,omitempty"`
+}
+
+// Ecarte : un pair ou un document que le serveur annonce, mais que ce
+// client refuse, et pourquoi.
 type Ecarte struct {
 	Nom, Adresse, Raison string
 }
 
 // Construire traduit l'état du réseau en pairs pour le moteur.
 //
-// cleServeur est celle retenue à l'inscription : si le serveur en annonce
-// une autre, on refuse tout. verrouRetenu, si non vide, est la clé du
-// verrou retenue à l'inscription : tout pair sans signature valide est
-// écarté, même si le serveur le présente.
-func Construire(r protocole.EtatReseau, cleServeur, verrouRetenu string, point netip.AddrPort) ([]tunnel.Pair, []Ecarte, error) {
-	if r.Serveur.ClePublique != cleServeur {
+// Sans verrou, le client croit le serveur sur les pairs et les règles : il
+// ne se protège que d'un serveur qui changerait de clé.
+//
+// Avec verrou, il ne croit que ce que l'admin a signé :
+//   - les pairs sans certificat valide, expiré ou révoqué sont écartés ;
+//   - ses propres règles d'entrée, il les calcule lui-même à partir de la
+//     politique signée et des certificats : le serveur ne peut pas lui
+//     ouvrir un port ;
+//   - une politique ou une liste de révocation plus ancienne que la
+//     dernière vue est refusée.
+func Construire(r protocole.EtatReseau, ret *Retenu, point netip.AddrPort, maintenant time.Time) ([]tunnel.Pair, []Ecarte, error) {
+	if r.Serveur.ClePublique != ret.CleServeur {
 		return nil, nil, errors.New("le serveur annonce une autre clé que celle retenue à l'inscription : refus")
 	}
-	var cleVerrou ed25519.PublicKey
-	if verrouRetenu != "" {
-		if r.Verrou != verrouRetenu {
-			return nil, nil, fmt.Errorf("le serveur annonce un autre verrou (%s) que celui retenu (%s) : refus",
-				EmpreinteVerrou(r.Verrou), EmpreinteVerrou(verrouRetenu))
-		}
-		var err error
-		if cleVerrou, err = verrou.LirePublique(verrouRetenu); err != nil {
-			return nil, nil, err
-		}
+	if r.Verrou != ret.Verrou {
+		return nil, nil, fmt.Errorf("le serveur annonce un autre verrou (%s) que celui retenu (%s) : refus",
+			EmpreinteVerrou(r.Verrou), EmpreinteVerrou(ret.Verrou))
 	}
 	adresseServeur, err := netip.ParseAddr(r.Serveur.Adresse)
-	if err != nil {
-		return nil, nil, fmt.Errorf("adresse du serveur : %w", err)
+	if err != nil || !adresseServeur.Is4() || !ret.Reseau.Contains(adresseServeur) {
+		return nil, nil, errors.New("adresse du serveur invalide")
 	}
-	pubServeur, err := cle32(cleServeur)
+	pubServeur, err := cle32(ret.CleServeur)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	entrant := map[netip.Addr][]tunnel.Regle{}
-	for _, e := range r.Entrant {
-		regles, err := VersRegles(e.Ports)
+	var ecartes []Ecarte
+	// valide : une adresse de pair doit être IPv4, dans le réseau, et ni la
+	// nôtre ni celle du serveur.
+	valide := func(p protocole.Appareil) ([32]byte, netip.Addr, bool) {
+		pub, err1 := cle32(p.ClePublique)
+		a, err2 := netip.ParseAddr(p.Adresse)
+		ok := err1 == nil && err2 == nil && a.Is4() && ret.Reseau.Contains(a) && a != ret.Moi &&
+			a != adresseServeur && p.Numero != 0 && p.ClePublique != ret.MaCle
+		if !ok {
+			ecartes = append(ecartes, Ecarte{Propre(p.Nom), Propre(p.Adresse), "annonce malformée"})
+		}
+		return pub, a, ok
+	}
+
+	type retenuPair struct {
+		p   protocole.Appareil
+		pub [32]byte
+		a   netip.Addr
+	}
+	var retenus []retenuPair
+	var entrant map[netip.Addr][]tunnel.Regle
+
+	if ret.Verrou == "" {
+		for _, p := range r.Pairs {
+			if pub, a, ok := valide(p); ok {
+				retenus = append(retenus, retenuPair{p, pub, a})
+			}
+		}
+		if entrant, err = entrantAnnonce(r.Entrant); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		cleVerrou, err := verrou.LirePublique(ret.Verrou)
 		if err != nil {
 			return nil, nil, err
 		}
-		for _, s := range e.Sources {
-			if a, err := netip.ParseAddr(s); err == nil {
-				entrant[a] = append(entrant[a], regles...)
+		ecartes = append(ecartes, adopterRevocations(r.Revocations, cleVerrou, ret)...)
+		pol, note := adopterPolitique(r, cleVerrou, ret)
+		if note != "" {
+			ecartes = append(ecartes, Ecarte{"politique", "", note})
+		}
+		certifie := func(p protocole.Appareil, pub [32]byte, a netip.Addr) bool {
+			sig, _ := base64.StdEncoding.DecodeString(p.Signature)
+			c := verrou.Certificat{Cle: pub, Adresse: a, Etiquette: p.Etiquette, Proprietaire: p.Proprietaire,
+				Groupe: p.Groupe, Expire: p.SignatureExpire}
+			return c.Verifier(cleVerrou, sig, maintenant)
+		}
+		// Nos propres attributs doivent aussi être signés : ce sont eux qui
+		// disent quelles règles nous concernent.
+		equipe := politique.Equipe{}
+		var apps []politique.Appareil
+		if maCle, err := cle32(ret.MaCle); err == nil && r.Moi.ClePublique == ret.MaCle && certifie(r.Moi, maCle, ret.Moi) {
+			apps = append(apps, politique.Appareil{Adresse: ret.Moi, Proprietaire: r.Moi.Proprietaire, Etiquette: r.Moi.Etiquette})
+			if r.Moi.Proprietaire != "" {
+				equipe[strings.ToLower(r.Moi.Proprietaire)] = r.Moi.Groupe
+			}
+		} else {
+			ecartes = append(ecartes, Ecarte{"cet appareil", ret.Moi.String(), "pas encore signé par le verrou : rien ne peut entrer"})
+		}
+		for _, p := range r.Pairs {
+			pub, a, ok := valide(p)
+			switch {
+			case !ok:
+			case slices.Contains(ret.Revoquees, p.ClePublique):
+				ecartes = append(ecartes, Ecarte{Propre(p.Nom), a.String(), "révoqué par le verrou"})
+			case !certifie(p, pub, a):
+				ecartes = append(ecartes, Ecarte{Propre(p.Nom), a.String(), "pas signé par le verrou (ou certificat expiré)"})
+			default:
+				retenus = append(retenus, retenuPair{p, pub, a})
+				apps = append(apps, politique.Appareil{Adresse: a, Proprietaire: p.Proprietaire, Etiquette: p.Etiquette})
+				if p.Proprietaire != "" {
+					equipe[strings.ToLower(p.Proprietaire)] = p.Groupe
+				}
+			}
+		}
+		entrant = map[netip.Addr][]tunnel.Regle{}
+		if pol != nil && len(apps) > 0 && apps[0].Adresse == ret.Moi {
+			flux := pol.Compiler(equipe, apps, adresseServeur)
+			for _, e := range politique.Entrant(flux, ret.Moi) {
+				regles, err := versRegles(e.Ports)
+				if err != nil {
+					return nil, nil, err
+				}
+				entrant[e.Source] = append(entrant[e.Source], regles...)
 			}
 		}
 	}
 
 	pairs := []tunnel.Pair{{Publique: pubServeur, Adresses: []netip.Prefix{netip.PrefixFrom(adresseServeur, 32)},
 		Point: point, Maintien: 25 * time.Second, Entrant: entrant[adresseServeur]}}
-	var ecartes []Ecarte
-	for _, p := range r.Pairs {
-		pub, err1 := cle32(p.ClePublique)
-		adresse, err2 := netip.ParseAddr(p.Adresse)
-		if err1 != nil || err2 != nil || adresse == adresseServeur || p.Numero == 0 {
-			ecartes = append(ecartes, Ecarte{p.Nom, p.Adresse, "annonce malformée"})
-			continue
-		}
-		if cleVerrou != nil {
-			sig, _ := base64.StdEncoding.DecodeString(p.Signature)
-			if !verrou.Verifier(cleVerrou, pub, adresse, sig) {
-				ecartes = append(ecartes, Ecarte{p.Nom, p.Adresse, "pas signé par le verrou"})
-				continue
-			}
-		}
-		pairs = append(pairs, tunnel.Pair{Publique: pub, Adresses: []netip.Prefix{netip.PrefixFrom(adresse, 32)},
-			Numero: p.Numero, ParRelais: true, Entrant: entrant[adresse]})
+	for _, x := range retenus {
+		pairs = append(pairs, tunnel.Pair{Publique: x.pub, Adresses: []netip.Prefix{netip.PrefixFrom(x.a, 32)},
+			Numero: x.p.Numero, ParRelais: true, Entrant: entrant[x.a]})
 	}
 	return pairs, ecartes, nil
+}
+
+// adopterRevocations : une liste signée plus récente que la nôtre la
+// remplace. Plus ancienne, ou mal signée, elle est ignorée : on garde la
+// nôtre, qui ne peut que s'allonger au fil des versions.
+func adopterRevocations(l *protocole.ListeRevocations, cleVerrou []byte, ret *Retenu) []Ecarte {
+	if l == nil || l.Version <= ret.VersionRevocations {
+		return nil
+	}
+	var cles [][32]byte
+	for _, c := range l.Cles {
+		k, err := cle32(c)
+		if err != nil {
+			return []Ecarte{{"révocations", "", "liste malformée, ignorée"}}
+		}
+		cles = append(cles, k)
+	}
+	sig, _ := base64.StdEncoding.DecodeString(l.Signature)
+	if !verrou.VerifierRevocations(cleVerrou, l.Version, cles, sig) {
+		return []Ecarte{{"révocations", "", "liste mal signée, ignorée"}}
+	}
+	ret.VersionRevocations, ret.Revoquees = l.Version, slices.Clone(l.Cles)
+	return nil
+}
+
+// adopterPolitique : la politique signée, si elle est valide et au moins
+// aussi récente que la dernière vue. Sinon, aucune : rien n'entre, sauf
+// les réponses à ce que l'on a ouvert.
+func adopterPolitique(r protocole.EtatReseau, cleVerrou []byte, ret *Retenu) (*politique.Politique, string) {
+	if r.Politique == "" {
+		return nil, "aucune politique signée : rien ne peut entrer"
+	}
+	brut, err1 := base64.StdEncoding.DecodeString(r.Politique)
+	sig, err2 := base64.StdEncoding.DecodeString(r.PolitiqueSignature)
+	if err1 != nil || err2 != nil || !verrou.VerifierPolitique(cleVerrou, r.PolitiqueVersion, brut, sig) {
+		return nil, "politique mal signée : refusée"
+	}
+	if r.PolitiqueVersion < ret.VersionPolitique {
+		return nil, fmt.Sprintf("politique plus ancienne (%d) que la dernière vue (%d) : refusée", r.PolitiqueVersion, ret.VersionPolitique)
+	}
+	var p politique.Politique
+	if err := json.Unmarshal(brut, &p); err != nil || p.Version != r.PolitiqueVersion {
+		return nil, "politique illisible ou version incohérente : refusée"
+	}
+	if _, err := politique.Verifier(p); err != nil {
+		return nil, "politique invalide : " + err.Error()
+	}
+	ret.VersionPolitique = r.PolitiqueVersion
+	return &p, ""
+}
+
+func entrantAnnonce(liste []protocole.RegleEntrante) (map[netip.Addr][]tunnel.Regle, error) {
+	entrant := map[netip.Addr][]tunnel.Regle{}
+	for _, e := range liste {
+		ports, err := politique.LirePorts(e.Ports)
+		if err != nil {
+			return nil, err
+		}
+		regles, _ := versRegles(ports)
+		for _, s := range e.Sources {
+			if a, err := netip.ParseAddr(s); err == nil && a.Is4() {
+				entrant[a] = append(entrant[a], regles...)
+			}
+		}
+	}
+	return entrant, nil
 }
 
 func cle32(b64 string) ([32]byte, error) {
@@ -217,14 +397,10 @@ func cle32(b64 string) ([32]byte, error) {
 	return k, nil
 }
 
-// VersRegles traduit des ports de la politique en règles du moteur.
-func VersRegles(ports []string) ([]tunnel.Regle, error) {
-	lus, err := politique.LirePorts(ports)
-	if err != nil {
-		return nil, err
-	}
+// versRegles traduit des ports de la politique en règles du moteur.
+func versRegles(ports []politique.Port) ([]tunnel.Regle, error) {
 	var r []tunnel.Regle
-	for _, p := range lus {
+	for _, p := range ports {
 		switch p.Proto {
 		case "*":
 			r = append(r, tunnel.Regle{})
@@ -234,6 +410,8 @@ func VersRegles(ports []string) ([]tunnel.Regle, error) {
 			r = append(r, tunnel.Regle{Proto: 6, Debut: p.Debut, Fin: p.Fin})
 		case "udp":
 			r = append(r, tunnel.Regle{Proto: 17, Debut: p.Debut, Fin: p.Fin})
+		default:
+			return nil, fmt.Errorf("protocole inconnu : %s", p.Proto)
 		}
 	}
 	return r, nil

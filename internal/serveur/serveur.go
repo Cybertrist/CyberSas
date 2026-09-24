@@ -3,7 +3,7 @@
 //
 // Une seule fonction décide de l'état du réseau : Synchroniser. Elle relit
 // l'équipe, la politique et les appareils, retire ce qui n'a plus lieu
-// d'être, puis pousse le résultat au moteur, à nftables et au DNS. Elle
+// d'être, puis pousse le résultat au pare-feu, au moteur et au DNS. Elle
 // tourne à chaque inscription, et toutes les cinq secondes, pour prendre
 // en compte une modification faite à la main.
 package serveur
@@ -14,6 +14,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -26,6 +27,7 @@ import (
 	"github.com/Cybertrist/CyberSas/internal/base"
 	"github.com/Cybertrist/CyberSas/internal/dns"
 	"github.com/Cybertrist/CyberSas/internal/politique"
+	"github.com/Cybertrist/CyberSas/internal/protocole"
 	"github.com/Cybertrist/CyberSas/internal/tunnel"
 	"github.com/Cybertrist/CyberSas/internal/verrou"
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -40,8 +42,14 @@ type Config struct {
 	Equipe        string       // fichier « adresse groupe »
 	Politique     string       // fichier JSON
 	ClientsGoogle string       // fichier : un identifiant client OAuth par ligne
-	Verrou        string       // fichier : clé publique du verrou, en base64 ; absent sans verrou
-	DureeAppareil time.Duration
+	// Verrou : clé publique du verrou, en base64. Absent sans verrou.
+	Verrou string
+	// SignaturePolitique : {"version": N, "signature": "..."}, produit par
+	// « sas verrou politique ». Revocations : la liste signée des clés
+	// bannies. Tous deux facultatifs, et relus à chaque demande.
+	SignaturePolitique string
+	Revocations        string
+	DureeAppareil      time.Duration
 }
 
 type Serveur struct {
@@ -52,20 +60,38 @@ type Serveur struct {
 	prive    *ecdh.PrivateKey
 	publique string
 	journal  *slog.Logger
+	rejeux   protocole.Rejeux
 
 	mu        sync.Mutex
 	flux      []politique.Flux
 	signature string
+	// Dernières versions lues avec succès : une équipe ou une politique
+	// momentanément illisible ne doit ni tout effacer, ni tout bloquer.
+	equipe politique.Equipe
+	pol    *politique.Politique
+	actifs map[[32]byte]bool // pairs donnés au moteur au dernier passage
 
 	// relations : les paires de numéros d'appareils que le moteur a le
-	// droit de relayer. Lues à chaque trame, d'où un verrou à part.
+	// droit de relayer, et les mêmes en adresses pour le DNS. Lues à chaque
+	// trame, d'où un verrou à part.
 	muRelations sync.RWMutex
 	relations   map[[2]uint32]bool
+	voit        map[[2]netip.Addr]bool
 
 	// La vérification Google a son propre verrou : aller chercher les clés
 	// de Google peut prendre du temps, et ne doit pas bloquer le reste.
 	muGoogle sync.Mutex
 	verif    *oidc.IDTokenVerifier
+}
+
+func Nouveau(cfg Config, b *base.Base, m *tunnel.Moteur, d *dns.Serveur, prive *ecdh.PrivateKey, journal *slog.Logger) *Serveur {
+	if journal == nil {
+		journal = slog.New(slog.DiscardHandler)
+	}
+	s := &Serveur{cfg: cfg, base: b, moteur: m, dns: d, journal: journal, prive: prive,
+		publique: base64.StdEncoding.EncodeToString(prive.PublicKey().Bytes())}
+	d.DefinirFiltre(s.Voit)
+	return s
 }
 
 // Relie dit si le moteur peut relayer une trame de l'appareil de vers
@@ -76,30 +102,16 @@ func (s *Serveur) Relie(de, vers uint32) bool {
 	return s.relations[[2]uint32{de, vers}]
 }
 
-// verrou : la clé publique du verrou, si l'admin en a mis un.
-func (s *Serveur) verrou() (ed25519.PublicKey, string) {
-	if s.cfg.Verrou == "" {
-		return nil, ""
+// Voit dit si l'appareil à l'adresse de peut connaître le nom de celui à
+// l'adresse vers : lui-même, le serveur, et ceux avec qui il est relié.
+// Les autres n'existent pas pour lui, pas même dans le DNS.
+func (s *Serveur) Voit(de, vers netip.Addr) bool {
+	if de == vers || vers == s.cfg.Serveur || de == s.cfg.Serveur {
+		return true
 	}
-	b, err := os.ReadFile(s.cfg.Verrou)
-	if err != nil {
-		return nil, ""
-	}
-	texte := strings.TrimSpace(string(b))
-	pub, err := verrou.LirePublique(texte)
-	if err != nil {
-		s.journal.Error("clé du verrou illisible", "erreur", err)
-		return nil, ""
-	}
-	return pub, texte
-}
-
-func Nouveau(cfg Config, b *base.Base, m *tunnel.Moteur, d *dns.Serveur, prive *ecdh.PrivateKey, journal *slog.Logger) *Serveur {
-	if journal == nil {
-		journal = slog.New(slog.DiscardHandler)
-	}
-	return &Serveur{cfg: cfg, base: b, moteur: m, dns: d, journal: journal, prive: prive,
-		publique: base64.StdEncoding.EncodeToString(prive.PublicKey().Bytes())}
+	s.muRelations.RLock()
+	defer s.muRelations.RUnlock()
+	return s.voit[[2]netip.Addr{de, vers}]
 }
 
 func jetonAleatoire() string {
@@ -108,12 +120,26 @@ func jetonAleatoire() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func (s *Serveur) chargerEquipe() politique.Equipe {
+// equipeCourante : la liste de l'équipe, ou la dernière lue avec succès.
+// Le booléen dit si la lecture vient de réussir. Appelée avec s.mu tenu.
+func (s *Serveur) equipeCourante() (politique.Equipe, bool) {
 	e, err := politique.ChargerEquipe(s.cfg.Equipe)
 	if err != nil {
-		s.journal.Error("équipe illisible, personne n'entre", "erreur", err)
-		return politique.Equipe{}
+		if s.equipe == nil {
+			s.journal.Error("équipe illisible, et aucune version précédente : personne n'entre", "erreur", err)
+			return politique.Equipe{}, false
+		}
+		s.journal.Error("équipe illisible : on garde la dernière version lue", "erreur", err)
+		return s.equipe, false
 	}
+	s.equipe = e
+	return e, true
+}
+
+func (s *Serveur) chargerEquipe() politique.Equipe {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, _ := s.equipeCourante()
 	return e
 }
 
@@ -123,40 +149,63 @@ func (s *Serveur) Synchroniser() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	equipe := s.chargerEquipe()
-	pol, err := politique.Charger(s.cfg.Politique)
-	if err != nil {
-		// Politique cassée : on garde l'ancienne plutôt que d'ouvrir ou de
-		// fermer tout le réseau sur une faute de frappe.
-		return fmt.Errorf("politique : %w", err)
-	}
+	equipe, equipeFraiche := s.equipeCourante()
 	appareils, err := s.base.Appareils()
 	if err != nil {
 		return err
 	}
 
+	// Les retraits d'abord, et quoi qu'il arrive à la politique : une faute
+	// de frappe dans politique.json ne doit pas maintenir un accès révoqué.
 	now := time.Now()
-	var gardes []base.Appareil
+	var gardes, sortis []base.Appareil
+	personnels := 0
 	for _, a := range appareils {
-		raison := ""
+		if a.Proprietaire != "" {
+			personnels++
+		}
 		switch {
 		case !a.Expire.IsZero() && now.After(a.Expire):
-			raison = "inscription expirée"
-		case a.Proprietaire != "" && equipe[a.Proprietaire] == "":
-			raison = "propriétaire sorti de l'équipe"
-		}
-		if raison != "" {
 			s.base.Supprimer(a.ID)
-			s.journal.Warn("appareil retiré", "evenement", "retrait", "appareil", a.Nom, "proprietaire", a.Proprietaire, "raison", raison)
-			continue
+			s.journal.Warn("appareil retiré", "evenement", "retrait", "appareil", a.Nom, "raison", "inscription expirée")
+		case a.Proprietaire != "" && equipe[a.Proprietaire] == "":
+			sortis = append(sortis, a)
+		default:
+			gardes = append(gardes, a)
 		}
-		gardes = append(gardes, a)
+	}
+	// Une équipe qui perd d'un coup plus de la moitié de ses appareils, c'est
+	// plus souvent un fichier tronqué qu'une décision : on refuse d'effacer,
+	// et l'on prévient. Leur accès est coupé quand même, puisqu'ils ne sont
+	// pas dans gardes.
+	massive := len(sortis) >= 3 && 2*len(sortis) > personnels
+	if len(sortis) > 0 && equipeFraiche && !massive {
+		for _, a := range sortis {
+			s.base.Supprimer(a.ID)
+			s.journal.Warn("appareil retiré", "evenement", "retrait", "appareil", a.Nom, "proprietaire", a.Proprietaire,
+				"raison", "propriétaire sorti de l'équipe")
+		}
+	} else if len(sortis) > 0 {
+		s.journal.Error("purge refusée : appareils coupés mais gardés en base, vérifier equipe.txt",
+			"evenement", "purge_refusee", "appareils", len(sortis), "sur", personnels)
+	}
+
+	pol, err := politique.Charger(s.cfg.Politique)
+	switch {
+	case err == nil:
+		s.pol = &pol
+	case s.pol != nil:
+		s.journal.Error("politique illisible : on garde la dernière version lue", "erreur", err)
+		pol = *s.pol
+	default:
+		s.journal.Error("politique illisible, et aucune version précédente : tout est fermé", "erreur", err)
+		pol = politique.Politique{}
 	}
 
 	var pairs []tunnel.Pair
 	var apps []politique.Appareil
 	numeros := map[netip.Addr]uint32{}
-	noms := map[string]netip.Addr{"serveur": s.cfg.Serveur}
+	noms := map[string]netip.Addr{}
 	var sig strings.Builder
 	for _, a := range gardes {
 		cle, err := base64.StdEncoding.DecodeString(a.ClePublique)
@@ -174,30 +223,58 @@ func (s *Serveur) Synchroniser() error {
 		noms[a.Nom] = a.Adresse
 		fmt.Fprintf(&sig, "%d %s %s %s %s %s|", a.ID, a.Nom, a.ClePublique, a.Adresse, a.Proprietaire, a.Etiquette)
 	}
+	// Les noms du serveur en dernier : aucun appareil ne peut les écraser.
+	for n := range base.NomsReserves {
+		noms[n] = s.cfg.Serveur
+	}
 	flux := pol.Compiler(equipe, apps, s.cfg.Serveur)
-	regles := politique.Nft(flux, s.cfg.Interface, s.cfg.Serveur)
+	regles := politique.Nft(flux, s.cfg.Interface, s.cfg.Serveur, s.cfg.Reseau)
 	sig.WriteString(regles)
 	if sig.String() == s.signature {
 		return nil
 	}
 
 	relations := map[[2]uint32]bool{}
+	voit := map[[2]netip.Addr]bool{}
 	for paire := range politique.Relations(flux, s.cfg.Serveur) {
 		de, vers := numeros[paire[0]], numeros[paire[1]]
 		if de != 0 && vers != 0 {
 			relations[[2]uint32{de, vers}] = true
+			voit[paire] = true
 		}
 	}
-	s.muRelations.Lock()
-	s.relations = relations
-	s.muRelations.Unlock()
 
-	s.moteur.DefinirPairs(pairs)
+	// Le pare-feu d'abord. S'il échoue, le noyau garde ses anciennes règles :
+	// on n'ajoute alors aucun nouveau pair, on n'applique que les retraits.
+	actifs := map[[32]byte]bool{}
 	if err := appliquerPareFeu(regles); err != nil {
-		return err
+		var restreints []tunnel.Pair
+		for _, p := range pairs {
+			if s.actifs[p.Publique] {
+				restreints = append(restreints, p)
+				actifs[p.Publique] = true
+			}
+		}
+		s.moteur.DefinirPairs(restreints)
+		s.muRelations.Lock()
+		for k := range s.relations {
+			if !relations[k] {
+				delete(s.relations, k)
+			}
+		}
+		s.muRelations.Unlock()
+		s.actifs = actifs
+		return fmt.Errorf("pare-feu : %w (seuls les retraits sont appliqués)", err)
 	}
+	for _, p := range pairs {
+		actifs[p.Publique] = true
+	}
+	s.muRelations.Lock()
+	s.relations, s.voit = relations, voit
+	s.muRelations.Unlock()
+	s.moteur.DefinirPairs(pairs)
 	s.dns.Definir(noms)
-	s.flux, s.signature = flux, sig.String()
+	s.flux, s.signature, s.actifs = flux, sig.String(), actifs
 	s.journal.Info("réseau synchronisé", "evenement", "synchronisation", "appareils", len(gardes),
 		"flux", len(flux), "relations", len(relations)/2)
 	return nil
@@ -219,6 +296,53 @@ func (s *Serveur) Boucle(ctx context.Context) {
 	}
 }
 
+// --- le verrou -------------------------------------------------------------------
+
+// verrou : la clé publique du verrou, si l'admin en a mis un.
+func (s *Serveur) verrou() (ed25519.PublicKey, string) {
+	if s.cfg.Verrou == "" {
+		return nil, ""
+	}
+	b, err := os.ReadFile(s.cfg.Verrou)
+	if err != nil {
+		return nil, ""
+	}
+	texte := strings.TrimSpace(string(b))
+	pub, err := verrou.LirePublique(texte)
+	if err != nil {
+		s.journal.Error("clé du verrou illisible", "erreur", err)
+		return nil, ""
+	}
+	return pub, texte
+}
+
+type signatureFichier struct {
+	Version   uint64 `json:"version"`
+	Signature string `json:"signature"`
+}
+
+// documentsSignes ajoute à l'état du réseau la politique signée et la liste
+// de révocation, telles que l'admin les a produites. Le serveur ne fait que
+// les transmettre : il ne peut pas les modifier sans que les appareils le
+// voient.
+func (s *Serveur) documentsSignes(e *protocole.EtatReseau) {
+	if pol, err := os.ReadFile(s.cfg.Politique); err == nil {
+		var sig signatureFichier
+		if b, err := os.ReadFile(s.cfg.SignaturePolitique); err == nil && json.Unmarshal(b, &sig) == nil {
+			e.Politique = base64.StdEncoding.EncodeToString(pol)
+			e.PolitiqueVersion, e.PolitiqueSignature = sig.Version, sig.Signature
+		}
+	}
+	if b, err := os.ReadFile(s.cfg.Revocations); err == nil {
+		var r protocole.ListeRevocations
+		if json.Unmarshal(b, &r) == nil {
+			e.Revocations = &r
+		}
+	}
+}
+
+// --- Google ------------------------------------------------------------------
+
 func (s *Serveur) clientsGoogle() []string {
 	b, err := os.ReadFile(s.cfg.ClientsGoogle)
 	if err != nil {
@@ -234,19 +358,20 @@ func (s *Serveur) clientsGoogle() []string {
 }
 
 // verifierGoogle valide un jeton d'identité Google : signature par les
-// clés publiées par Google, émetteur, expiration, et surtout destinataire.
-// Un jeton émis pour une autre application ne passe pas.
-func (s *Serveur) verifierGoogle(ctx context.Context, jeton string) (string, error) {
+// clés publiées par Google, émetteur, expiration, destinataire et partie
+// autorisée (azp). Un jeton émis pour une autre application ne passe pas.
+// Rend l'adresse et l'identifiant permanent du compte.
+func (s *Serveur) verifierGoogle(ctx context.Context, jeton string) (email, sub string, err error) {
 	clients := s.clientsGoogle()
 	if len(clients) == 0 {
-		return "", fmt.Errorf("aucun client Google configuré")
+		return "", "", fmt.Errorf("aucun client Google configuré")
 	}
 	s.muGoogle.Lock()
 	if s.verif == nil {
 		p, err := oidc.NewProvider(ctx, "https://accounts.google.com")
 		if err != nil {
 			s.muGoogle.Unlock()
-			return "", fmt.Errorf("Google injoignable : %w", err)
+			return "", "", fmt.Errorf("Google injoignable : %w", err)
 		}
 		s.verif = p.Verifier(&oidc.Config{SkipClientIDCheck: true})
 	}
@@ -255,22 +380,26 @@ func (s *Serveur) verifierGoogle(ctx context.Context, jeton string) (string, err
 
 	tok, err := v.Verify(ctx, jeton)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if !slices.ContainsFunc(tok.Audience, func(a string) bool { return slices.Contains(clients, a) }) {
-		return "", fmt.Errorf("jeton émis pour une autre application")
+		return "", "", fmt.Errorf("jeton émis pour une autre application")
 	}
 	var c struct {
 		Email   string `json:"email"`
 		Verifie bool   `json:"email_verified"`
+		Azp     string `json:"azp"`
 	}
 	if err := tok.Claims(&c); err != nil {
-		return "", err
+		return "", "", err
 	}
-	if !c.Verifie || c.Email == "" {
-		return "", fmt.Errorf("adresse non vérifiée par Google")
+	if c.Azp != "" && !slices.Contains(clients, c.Azp) {
+		return "", "", fmt.Errorf("jeton obtenu par une autre application (azp)")
 	}
-	return strings.ToLower(c.Email), nil
+	if !c.Verifie || c.Email == "" || tok.Subject == "" {
+		return "", "", fmt.Errorf("adresse non vérifiée par Google")
+	}
+	return strings.ToLower(c.Email), tok.Subject, nil
 }
 
 // appliquerPareFeu charge les règles dans le noyau. Variable pour que les

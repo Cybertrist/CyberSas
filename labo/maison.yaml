@@ -1,0 +1,63 @@
+# Le labo : ce qui, en vrai, ne tournerait pas sur le VPS.
+#
+# maison joue le serveur à la maison. Il n'a aucun port publié : il sort
+# vers le VPS par le VPN, et c'est tout. Le service de démonstration, whoami,
+# vit dans son espace réseau et répond sur maison.sas.internal:80.
+# demo-admin fait de même sur le port 8080.
+#
+# poste joue l'ordinateur d'un membre de l'équipe, pour vérifier que les
+# règles d'accès laissent passer ce qu'elles doivent, et rien d'autre.
+#
+# Les deux rejoignent le réseau « public » de la pile principale, qui tient
+# lieu d'Internet : ils n'atteignent le VPS que par hs.DOMAINE.
+
+name: cybersas-labo
+
+x-noeud: &noeud
+  image: tailscale/tailscale:v1.102.4
+  restart: unless-stopped
+  command: ["tailscaled", "--state=/var/lib/tailscale/tailscaled.state", "--tun=tailscale0"]
+  cap_add: [NET_ADMIN, NET_RAW]
+  devices: ["/dev/net/tun:/dev/net/tun"]
+  environment:
+    SSL_CERT_DIR: /etc/ssl/certs:/ca
+  networks: [public]
+
+services:
+  maison:
+    <<: *noeud
+    hostname: maison
+    volumes:
+      - maison:/var/lib/tailscale
+      - ../etat/ca/public:/ca:ro
+
+  demo:
+    image: traefik/whoami:v1.12.0
+    restart: unless-stopped
+    network_mode: service:maison
+    depends_on: [maison]
+
+  # Un second service, sur 8080, que la politique réserve aux admins :
+  # l'essai vérifie que l'équipe s'y cogne.
+  demo-admin:
+    image: traefik/whoami:v1.12.0
+    restart: unless-stopped
+    command: ["--port", "8080"]
+    network_mode: service:maison
+    depends_on: [maison]
+
+  poste:
+    <<: *noeud
+    hostname: poste
+    volumes:
+      - poste:/var/lib/tailscale
+      - ../etat/ca/public:/ca:ro
+
+networks:
+  public:
+    name: cybersas_public
+    external: true
+
+volumes:
+  maison:
+  poste:

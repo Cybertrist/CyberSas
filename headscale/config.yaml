@@ -1,0 +1,95 @@
+# Headscale : le serveur de coordination du VPN.
+#
+# Modèle : sas.sh remplace @DOMAINE@ et écrit le résultat dans
+# etat/headscale/config.yaml. Ne pas lancer Headscale sur ce fichier-ci.
+#
+# Headscale ne voit jamais Internet en direct. Nginx termine le TLS et lui
+# passe le trafic en clair sur le réseau interne, d'où trusted_proxies.
+
+server_url: https://hs.@DOMAINE@
+listen_addr: 0.0.0.0:8080
+metrics_listen_addr: 127.0.0.1:9090
+grpc_listen_addr: 127.0.0.1:50443
+grpc_allow_insecure: false
+trusted_proxies:
+  - 172.30.2.0/24
+
+noise:
+  private_key_path: /var/lib/headscale/noise_private.key
+
+prefixes:
+  v4: 100.64.0.0/10
+  v6: fd7a:115c:a1e0::/48
+  allocation: sequential
+
+# Le relais DERP est celui de Headscale, servi par Nginx sous /derp : le
+# trafic chiffré qui ne passe pas en direct reste chez nous, au lieu de
+# transiter par les serveurs de Tailscale.
+derp:
+  server:
+    enabled: true
+    region_id: 999
+    region_code: "sas"
+    region_name: "CyberSas"
+    verify_clients: true
+    stun_listen_addr: "0.0.0.0:3478"
+    private_key_path: /var/lib/headscale/derp_server_private.key
+    automatically_add_embedded_derp_region: true
+  urls: []
+  paths: []
+  auto_update_enabled: false
+
+disable_check_updates: true
+
+node:
+  # Un appareil doit repasser par Authelia tous les 30 jours.
+  expiry: 30d
+  ephemeral:
+    inactivity_timeout: 30m
+
+database:
+  type: sqlite
+  sqlite:
+    path: /var/lib/headscale/db.sqlite
+    write_ahead_log: true
+
+log:
+  level: info
+  format: json
+
+policy:
+  mode: file
+  path: /etc/headscale-politique/politique.hujson
+
+dns:
+  magic_dns: true
+  # Chaque appareil se joint par son nom : relais.sas.internal,
+  # maison.sas.internal. .internal est réservé aux réseaux privés.
+  base_domain: sas.internal
+  override_local_dns: true
+  nameservers:
+    global:
+      - 1.1.1.1
+      - 1.0.0.1
+
+unix_socket: /var/run/headscale/headscale.sock
+unix_socket_permission: "0770"
+
+# La connexion passe par Authelia : identifiant, mot de passe et second
+# facteur. Le secret du client est lu dans un fichier, jamais écrit ici.
+oidc:
+  only_start_if_oidc_is_available: true
+  issuer: https://auth.@DOMAINE@
+  client_id: headscale
+  client_secret_path: /secrets/oidc_client_secret
+  scope: ["openid", "profile", "email", "groups"]
+  pkce:
+    enabled: true
+    method: S256
+
+logtail:
+  enabled: false
+
+# Taildrop : envoyer un fichier d'un appareil à un autre, dans le tunnel.
+taildrop:
+  enabled: true

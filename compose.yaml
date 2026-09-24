@@ -1,0 +1,120 @@
+# CyberSas : la pile qui tourne sur le serveur public (le VPS).
+#
+# Un seul conteneur touche Internet : le relais. Il porte les ports 80 et
+# 443, et Nginx vit dans son espace réseau. Headscale et Authelia sont sur
+# un réseau interne sans sortie, joignables seulement à travers Nginx.
+#
+# Le relais est aussi un nœud du VPN : c'est par lui que Nginx atteint les
+# services hébergés à la maison, sans qu'aucun port n'y soit ouvert.
+#
+# Rien ne se lance à la main : scripts/sas.sh prépare les secrets et les
+# configurations dans etat/, puis démarre la pile.
+
+name: cybersas
+
+x-journaux: &journaux
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  relais:
+    image: tailscale/tailscale:v1.102.4
+    hostname: relais
+    restart: unless-stopped
+    <<: *journaux
+    # tailscaled seul : l'inscription se fait ensuite par sas.sh, avec une
+    # clé à usage unique, pour qu'aucune clé ne dorme dans ce fichier.
+    command: ["tailscaled", "--state=/var/lib/tailscale/tailscaled.state", "--tun=tailscale0"]
+    cap_add: [NET_ADMIN, NET_RAW]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    environment:
+      # Les racines du système, plus l'autorité du labo quand il y en a une.
+      SSL_CERT_DIR: /etc/ssl/certs:/ca
+    volumes:
+      - relais:/var/lib/tailscale
+      - ./etat/ca/public:/ca:ro
+    ports:
+      - "${PORT_HTTP:-80}:80"
+      - "${PORT_HTTPS:-443}:443"
+    networks:
+      public:
+        aliases: &noms ["hs.${DOMAINE}", "auth.${DOMAINE}", "maison.${DOMAINE}"]
+      interne:
+        aliases: *noms
+
+  nginx:
+    image: nginx:1.30.5-alpine
+    restart: unless-stopped
+    <<: *journaux
+    network_mode: service:relais
+    depends_on: [relais]
+    environment:
+      DOMAINE: ${DOMAINE}
+      # Seule DOMAINE est remplacée dans les modèles : $host et les autres
+      # variables de Nginx restent intactes.
+      NGINX_ENVSUBST_FILTER: "^DOMAINE$$"
+    volumes:
+      - ./nginx/modeles:/etc/nginx/templates:ro
+      - ./nginx/extraits:/etc/nginx/extraits:ro
+      - ./etat/tls:/etc/nginx/tls:ro
+      - journaux-nginx:/var/log/nginx
+
+  headscale:
+    image: headscale/headscale:0.29.4
+    restart: unless-stopped
+    <<: *journaux
+    command: serve
+    read_only: true
+    tmpfs: [/var/run/headscale]
+    environment:
+      SSL_CERT_DIR: /etc/ssl/certs:/ca
+    volumes:
+      - ./etat/headscale:/etc/headscale:ro
+      - ./headscale/politique.hujson:/etc/headscale-politique/politique.hujson:ro
+      - ./etat/secrets/headscale:/secrets:ro
+      - ./etat/ca/public:/ca:ro
+      - headscale:/var/lib/headscale
+    networks: [interne]
+    healthcheck:
+      test: ["CMD", "headscale", "health"]
+      interval: 10s
+      retries: 12
+
+  authelia:
+    image: authelia/authelia:4.39.28
+    restart: unless-stopped
+    <<: *journaux
+    environment:
+      DOMAINE: ${DOMAINE}
+      X_AUTHELIA_CONFIG_FILTERS: template
+      AUTHELIA_SESSION_SECRET_FILE: /secrets/session
+      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /secrets/stockage
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /secrets/jwt
+      AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE: /secrets/oidc_hmac
+    volumes:
+      - ./authelia/configuration.yml:/config/configuration.yml:ro
+      - ./etat/authelia:/utilisateurs
+      - ./etat/secrets/authelia:/secrets:ro
+      - authelia:/data
+    networks: [interne]
+
+networks:
+  public:
+    name: cybersas_public
+    ipam:
+      config: [{subnet: 172.30.1.0/24}]
+  interne:
+    name: cybersas_interne
+    # Pas de passerelle : Headscale et Authelia ne sortent jamais d'eux-mêmes.
+    internal: true
+    ipam:
+      config: [{subnet: 172.30.2.0/24}]
+
+volumes:
+  relais:
+  headscale:
+  authelia:
+  journaux-nginx:

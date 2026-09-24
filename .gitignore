@@ -1,0 +1,3 @@
+# Secrets, clés, certificats et comptes : propres à chaque installation.
+etat/
+.env

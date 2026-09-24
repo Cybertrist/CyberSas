@@ -1,3 +1,5 @@
 # Secrets, clés, certificats et comptes : propres à chaque installation.
 etat/
 .env
+# Signée avec la clé du verrou de chaque installation.
+politique/politique.sig

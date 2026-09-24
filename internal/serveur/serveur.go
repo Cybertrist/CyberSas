@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Cybertrist/CyberSas/internal/b64"
+
 	"github.com/Cybertrist/CyberSas/internal/base"
 	"github.com/Cybertrist/CyberSas/internal/dns"
 	"github.com/Cybertrist/CyberSas/internal/politique"
@@ -208,7 +210,7 @@ func (s *Serveur) Synchroniser() error {
 	noms := map[string]netip.Addr{}
 	var sig strings.Builder
 	for _, a := range gardes {
-		cle, err := base64.StdEncoding.DecodeString(a.ClePublique)
+		cle, err := b64.Decoder(a.ClePublique)
 		if err != nil || len(cle) != 32 {
 			continue
 		}

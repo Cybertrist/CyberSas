@@ -13,7 +13,7 @@ import (
 	"github.com/Cybertrist/CyberSas/internal/verrou"
 )
 
-func b64(n int) string {
+func aleatoire64(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
 	return base64.StdEncoding.EncodeToString(b)
@@ -34,7 +34,7 @@ const politiqueJSON = `{"version": 3, "regles": [
 ]}`
 
 func (r *reseauSigne) appareil(numero uint32, nom, adresse, etiquette, proprietaire, groupe string) protocole.Appareil {
-	cle := b64(32)
+	cle := aleatoire64(32)
 	k, _ := cle32(cle)
 	exp := time.Now().Add(time.Hour).Truncate(time.Second)
 	c := verrou.Certificat{Cle: k, Adresse: netip.MustParseAddr(adresse), Etiquette: etiquette,
@@ -48,7 +48,7 @@ func nouveauReseauSigne(t *testing.T) *reseauSigne {
 	pub, prive, _ := verrou.Generer()
 	r := &reseauSigne{prive: prive}
 	texteV := base64.StdEncoding.EncodeToString(pub)
-	cleServeur := b64(32)
+	cleServeur := aleatoire64(32)
 	moi := r.appareil(4, "poste-alice", "10.77.0.4", "", "alice@x.fr", "equipe")
 	r.ret = Retenu{CleServeur: cleServeur, Verrou: texteV, MaCle: moi.ClePublique,
 		Moi: netip.MustParseAddr("10.77.0.4"), Reseau: netip.MustParsePrefix("10.77.0.0/24")}
@@ -104,7 +104,7 @@ func TestVerrouPairsNonSignes(t *testing.T) {
 	r := nouveauReseauSigne(t)
 	maison := r.etat.Pairs[0]
 	intrus := maison
-	intrus.Numero, intrus.Nom, intrus.Adresse, intrus.ClePublique = 9, "maison-bis", "10.77.0.9", b64(32) // clé du serveur piraté
+	intrus.Numero, intrus.Nom, intrus.Adresse, intrus.ClePublique = 9, "maison-bis", "10.77.0.9", aleatoire64(32) // clé du serveur piraté
 	vol := maison
 	vol.Numero, vol.Nom, vol.Adresse = 8, "vol", "10.77.0.8" // bonne signature, autre adresse
 	promu := r.etat.Pairs[1]
@@ -176,7 +176,7 @@ func TestVerrouCetAppareilNonSigne(t *testing.T) {
 func TestConstruireRefuseAutreServeurOuVerrou(t *testing.T) {
 	r := nouveauReseauSigne(t)
 	autre := r.etat
-	autre.Serveur.ClePublique = b64(32)
+	autre.Serveur.ClePublique = aleatoire64(32)
 	if _, _, err := Construire(autre, &r.ret, netip.AddrPort{}, time.Now()); err == nil {
 		t.Fatal("une clé de serveur différente de celle retenue a été acceptée")
 	}
@@ -201,5 +201,36 @@ func TestAPIRefuseHTTP(t *testing.T) {
 func TestPropre(t *testing.T) {
 	if Propre("maison\x1b[2J\x1b[Hsigné") != "maison?[2J?[Hsigné" {
 		t.Fatal("les séquences de terminal doivent être neutralisées")
+	}
+}
+
+// Revue de sécurité : un serveur piraté réécrit la clé d'un appareil
+// révoqué avec d'autres bits de bourrage. Mêmes octets, autre texte : elle
+// ne doit ni échapper à la révocation, ni même être lue.
+func TestRevocationEcritureNonCanonique(t *testing.T) {
+	r := nouveauReseauSigne(t)
+	maison := r.etat.Pairs[0]
+	k, _ := cle32(maison.ClePublique)
+	r.etat.Revocations = &protocole.ListeRevocations{Version: 2, Cles: []string{maison.ClePublique},
+		Signature: base64.StdEncoding.EncodeToString(verrou.SignerRevocations(r.prive, 2, [][32]byte{k}))}
+	autre := []byte(maison.ClePublique)
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	i := len(autre) - 2
+	for j := range alphabet {
+		if alphabet[j] == autre[i] {
+			autre[i] = alphabet[j^1] // change un bit de bourrage
+			break
+		}
+	}
+	if d, err := base64.StdEncoding.DecodeString(string(autre)); err != nil || [32]byte(d) != k {
+		t.Fatal("hypothèse du test fausse : la variante devait donner la même clé au décodeur standard")
+	}
+	maison.ClePublique = string(autre)
+	r.etat.Pairs[0] = maison
+	pairs, _ := r.construire(t)
+	for _, p := range pairs {
+		if p.Publique == k {
+			t.Fatal("la maison révoquée est revenue sous une autre écriture de sa clé")
+		}
 	}
 }

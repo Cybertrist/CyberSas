@@ -38,6 +38,8 @@ import (
 	"net/netip"
 	"slices"
 	"time"
+
+	"github.com/Cybertrist/CyberSas/internal/b64"
 )
 
 // Chaque type de document a son contexte : une signature faite pour l'un
@@ -150,8 +152,8 @@ func Empreinte(cle []byte) string {
 	return fmt.Sprintf("%s-%s-%s", s[0:4], s[4:8], s[8:12])
 }
 
-func LirePublique(b64 string) (ed25519.PublicKey, error) {
-	b, err := base64.StdEncoding.DecodeString(b64)
+func LirePublique(texte string) (ed25519.PublicKey, error) {
+	b, err := b64.Decoder(texte)
 	if err != nil || len(b) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("clé de verrou invalide")
 	}

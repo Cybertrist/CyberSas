@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Cybertrist/CyberSas/internal/b64"
+
 	"golang.org/x/crypto/blake2s"
 )
 
@@ -76,7 +78,7 @@ func (d DemandeConnexion) VerifierPreuve(serveur *ecdh.PrivateKey, publiqueAppar
 	if ecart > FenetrePreuve || ecart < -FenetrePreuve {
 		return false
 	}
-	recue, err := base64.StdEncoding.DecodeString(d.Preuve)
+	recue, err := b64.Decoder(d.Preuve)
 	if err != nil {
 		return false
 	}

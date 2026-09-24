@@ -13,6 +13,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Cybertrist/CyberSas/internal/b64"
+
 	"github.com/Cybertrist/CyberSas/internal/base"
 	"github.com/Cybertrist/CyberSas/internal/politique"
 	"github.com/Cybertrist/CyberSas/internal/protocole"
@@ -97,7 +99,7 @@ func (s *Serveur) connexion(w http.ResponseWriter, r *http.Request) {
 		refuser(w, http.StatusBadRequest, "demande illisible")
 		return
 	}
-	cle, err := base64.StdEncoding.DecodeString(d.ClePublique)
+	cle, err := b64.Decoder(d.ClePublique)
 	if err != nil || len(cle) != 32 || !clePubliqueValide(cle) {
 		refuser(w, http.StatusBadRequest, "clé publique invalide")
 		return
@@ -320,8 +322,8 @@ func ImporterCertificats(b *base.Base, cleVerrou ed25519.PublicKey, liste []prot
 	}
 	for _, a := range liste {
 		f, connu := parCle[a.ClePublique]
-		k, err1 := base64.StdEncoding.DecodeString(a.ClePublique)
-		sig, err2 := base64.StdEncoding.DecodeString(a.Signature)
+		k, err1 := b64.Decoder(a.ClePublique)
+		sig, err2 := b64.Decoder(a.Signature)
 		if !connu || err1 != nil || err2 != nil || len(k) != 32 {
 			refuses = append(refuses, a.Nom)
 			continue

@@ -29,6 +29,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Cybertrist/CyberSas/internal/b64"
+
 	"github.com/Cybertrist/CyberSas/internal/politique"
 	"github.com/Cybertrist/CyberSas/internal/protocole"
 	"github.com/Cybertrist/CyberSas/internal/tunnel"
@@ -130,7 +132,7 @@ func (a *API) Inscrire(prive *ecdh.PrivateKey, nom, systeme string, j Justificat
 	if err := a.Appel("GET", protocole.CheminServeur, "", nil, &srv); err != nil {
 		return r, fmt.Errorf("clé du serveur : %w", err)
 	}
-	cleServeur, err := base64.StdEncoding.DecodeString(srv.ClePublique)
+	cleServeur, err := b64.Decoder(srv.ClePublique)
 	if err != nil || len(cleServeur) != 32 {
 		return r, errors.New("clé du serveur invalide")
 	}
@@ -154,11 +156,11 @@ func (a *API) Inscrire(prive *ecdh.PrivateKey, nom, systeme string, j Justificat
 	return r, nil
 }
 
-func EmpreinteVerrou(b64 string) string {
-	if b64 == "" {
+func EmpreinteVerrou(texte string) string {
+	if texte == "" {
 		return "aucun"
 	}
-	pub, err := verrou.LirePublique(b64)
+	pub, err := verrou.LirePublique(texte)
 	if err != nil {
 		return "illisible"
 	}
@@ -167,8 +169,8 @@ func EmpreinteVerrou(b64 string) string {
 
 // EmpreinteCle : l'empreinte d'une clé d'appareil, que l'admin compare avec
 // celle affichée par l'appareil lui-même avant de le signer.
-func EmpreinteCle(b64 string) string {
-	b, err := base64.StdEncoding.DecodeString(b64)
+func EmpreinteCle(texte string) string {
+	b, err := b64.Decoder(texte)
 	if err != nil {
 		return "illisible"
 	}
@@ -261,12 +263,22 @@ func Construire(r protocole.EtatReseau, ret *Retenu, point netip.AddrPort, maint
 			return nil, nil, err
 		}
 		ecartes = append(ecartes, adopterRevocations(r.Revocations, cleVerrou, ret)...)
+		// Les révocations se comparent sur les octets des clés, jamais sur
+		// leur écriture : une même clé peut s'écrire de plusieurs façons en
+		// base64, et un serveur piraté en profiterait pour faire passer une
+		// clé révoquée.
+		revoquees := map[[32]byte]bool{}
+		for _, c := range ret.Revoquees {
+			if k, err := cle32(c); err == nil {
+				revoquees[k] = true
+			}
+		}
 		pol, note := adopterPolitique(r, cleVerrou, ret)
 		if note != "" {
 			ecartes = append(ecartes, Ecarte{"politique", "", note})
 		}
 		certifie := func(p protocole.Appareil, pub [32]byte, a netip.Addr) bool {
-			sig, _ := base64.StdEncoding.DecodeString(p.Signature)
+			sig, _ := b64.Decoder(p.Signature)
 			c := verrou.Certificat{Cle: pub, Adresse: a, Etiquette: p.Etiquette, Proprietaire: p.Proprietaire,
 				Groupe: p.Groupe, Expire: p.SignatureExpire}
 			return c.Verifier(cleVerrou, sig, maintenant)
@@ -287,7 +299,7 @@ func Construire(r protocole.EtatReseau, ret *Retenu, point netip.AddrPort, maint
 			pub, a, ok := valide(p)
 			switch {
 			case !ok:
-			case slices.Contains(ret.Revoquees, p.ClePublique):
+			case revoquees[pub]:
 				ecartes = append(ecartes, Ecarte{Propre(p.Nom), a.String(), "révoqué par le verrou"})
 			case !certifie(p, pub, a):
 				ecartes = append(ecartes, Ecarte{Propre(p.Nom), a.String(), "pas signé par le verrou (ou certificat expiré)"})
@@ -336,7 +348,7 @@ func adopterRevocations(l *protocole.ListeRevocations, cleVerrou []byte, ret *Re
 		}
 		cles = append(cles, k)
 	}
-	sig, _ := base64.StdEncoding.DecodeString(l.Signature)
+	sig, _ := b64.Decoder(l.Signature)
 	if !verrou.VerifierRevocations(cleVerrou, l.Version, cles, sig) {
 		return []Ecarte{{"révocations", "", "liste mal signée, ignorée"}}
 	}
@@ -351,8 +363,8 @@ func adopterPolitique(r protocole.EtatReseau, cleVerrou []byte, ret *Retenu) (*p
 	if r.Politique == "" {
 		return nil, "aucune politique signée : rien ne peut entrer"
 	}
-	brut, err1 := base64.StdEncoding.DecodeString(r.Politique)
-	sig, err2 := base64.StdEncoding.DecodeString(r.PolitiqueSignature)
+	brut, err1 := b64.Decoder(r.Politique)
+	sig, err2 := b64.Decoder(r.PolitiqueSignature)
 	if err1 != nil || err2 != nil || !verrou.VerifierPolitique(cleVerrou, r.PolitiqueVersion, brut, sig) {
 		return nil, "politique mal signée : refusée"
 	}
@@ -387,15 +399,8 @@ func entrantAnnonce(liste []protocole.RegleEntrante) (map[netip.Addr][]tunnel.Re
 	return entrant, nil
 }
 
-func cle32(b64 string) ([32]byte, error) {
-	var k [32]byte
-	b, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil || len(b) != 32 {
-		return k, errors.New("clé publique invalide")
-	}
-	copy(k[:], b)
-	return k, nil
-}
+// cle32 : une clé de 32 octets, en écriture base64 canonique (voir b64).
+func cle32(texte string) ([32]byte, error) { return b64.Cle32(texte) }
 
 // versRegles traduit des ports de la politique en règles du moteur.
 func versRegles(ports []politique.Port) ([]tunnel.Regle, error) {

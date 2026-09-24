@@ -155,6 +155,12 @@ une session sans rien révéler de l'identité de l'appareil.
   correspondrait pas.
 - **Une adresse usurpée.** Un paquet ne sort du tunnel que si son adresse
   source est celle du pair qui l'a chiffré.
+- **Un paquet qui ne nous est pas destiné.** Sa destination doit être notre
+  propre adresse dans le VPN. Sans cela, un pair autorisé sur un port pourrait
+  se servir de nous comme routeur vers notre réseau local.
+- **Une réponse forgée.** La lecture d'une réponse travaille sur une copie de
+  l'état Noise : une réponse fausse n'empêche pas la vraie de passer. En direct,
+  la réponse doit venir d'où l'initiation est partie.
 - **Ce que le filtre n'autorise pas.** Voir plus bas.
 
 ## Protection contre l'inondation : mac1, mac2, cookie
@@ -172,19 +178,29 @@ Repris de WireGuard. Une poignée de main coûte deux échanges X25519.
   le mac1 reçu en données associées. Seul celui qui reçoit vraiment les paquets
   envoyés à son adresse peut s'en servir.
 - Une adresse qui a prouvé la possession de son IP garde droit à dix poignées
-  de main par seconde, pas plus.
+  de main par seconde, pas plus. Le seau est celui de son réseau : /32 en IPv4,
+  /64 en IPv6, pour que posséder un /64 ne donne pas des milliards de seaux.
+- Les poignées de main **relayées** échappent aux cookies : elles sont
+  limitées par couple d'appareils chez le serveur, et par pair chez le client.
 
 ## Le filtre, chez celui qui reçoit
 
 Le serveur ne voit plus les paquets entre appareils : il ne peut plus appliquer
-les règles d'accès. C'est donc l'appareil qui reçoit qui filtre, avec les
-règles que le serveur lui transmet dans l'état du réseau.
+les règles d'accès. C'est donc l'appareil qui reçoit qui filtre.
 
+- **Sans verrou**, avec les règles que le serveur lui transmet.
+- **Avec verrou**, avec les règles qu'il **calcule lui-même** à partir de la
+  politique signée et des certificats signés (voir plus bas). Le serveur ne
+  peut alors ni ouvrir un port, ni changer à qui une règle s'applique.
 - Ce qu'un appareil envoie n'est jamais filtré.
 - Ce qui entre doit correspondre à une règle pour ce pair (protocole et port de
-  destination), ou répondre à un flux que l'appareil a lui-même ouvert : le
-  suivi des connexions retient chaque flux sortant, cinq minutes en TCP, une en
-  UDP, trente secondes en ICMP.
+  destination), ou répondre à un flux que l'appareil a lui-même ouvert vers ce
+  même pair : le suivi des connexions retient chaque flux sortant, cinq minutes
+  en TCP, une en UDP, trente secondes pour une demande d'écho ICMP, dont seule
+  la réponse d'écho peut revenir.
+- Chaque pair a son propre budget dans ce suivi, et répondre à ce qu'une règle
+  laisse déjà entrer n'y consomme rien : un pair ne peut pas remplir la table
+  au détriment des autres.
 - Un fragment qui n'est pas le premier n'a pas d'en-tête de transport : il ne
   passe qu'avec une règle « tout ».
 
@@ -200,35 +216,66 @@ même pas se faire une poignée de main.
 1. L'appareil tire sa paire de clés X25519. La clé privée ne le quitte jamais.
 2. Il demande la clé publique du serveur (`GET /api/v1/serveur`).
 3. Il calcule une **preuve de possession** : un HMAC-BLAKE2s, avec pour clé le
-   secret X25519 entre sa clé et celle du serveur, sur un contexte, les deux
-   clés publiques et l'horodatage de la demande. Seul le détenteur de la clé
-   privée peut le produire. Le serveur refuse une preuve fausse, ou vieille de
-   plus de cinq minutes.
+   secret X25519 entre sa clé et celle du serveur, sur toute la demande : les
+   deux clés publiques, l'horodatage, le justificatif, le nom et le système.
+   Seul le détenteur de la clé privée peut la produire, et elle ne se recolle
+   pas à une autre demande. Le serveur refuse une preuve fausse, vieille de
+   plus de cinq minutes, ou qui a déjà servi à une inscription réussie.
 4. Il envoie la preuve avec un justificatif : un jeton d'identité Google, ou
    une clé d'inscription à usage unique donnée par l'admin.
 5. Le serveur vérifie le jeton auprès de Google (signature, émetteur,
-   expiration, destinataire, adresse vérifiée), puis que l'adresse figure dans
-   la liste de l'équipe. Il attribue une adresse `10.77.0.x` et un numéro.
+   expiration, destinataire, partie autorisée, adresse vérifiée), puis que
+   l'adresse figure dans la liste de l'équipe. À la première inscription d'une
+   adresse, il retient l'identifiant permanent du compte Google : une adresse
+   recyclée n'ouvre pas l'accès de l'ancien titulaire. Il attribue une adresse
+   `10.77.0.x` et un numéro, qui ne sont jamais redonnés tout de suite à un
+   autre appareil.
 
 Une clé déjà inscrite ne change jamais de propriétaire ni d'étiquette : même
-avec la clé privée, on ne fait pas passer l'appareil d'Alice à Bob.
+avec la clé privée, on ne fait pas passer l'appareil d'Alice à Bob. Le nom d'une
+machine est fixé par l'admin dans sa clé d'inscription ; celui d'un appareil
+personnel porte toujours le nom de son propriétaire (`portable-alice`), pour
+que personne ne prenne celui d'une machine ou du serveur.
+
+Toutes les clés, signatures et preuves reçues sont décodées par un décodeur
+base64 **canonique** ([`internal/b64`](../internal/b64)) : une valeur n'a
+qu'une écriture acceptée. Le décodeur standard en accepte plusieurs, et un
+serveur piraté s'en serait servi pour faire passer une clé révoquée.
 
 ## Le verrou du réseau
 
 Le chiffrement de bout en bout empêche le serveur de lire. Mais c'est lui qui
-distribue les clés publiques : un serveur piraté pourrait annoncer sa propre clé
-sous le nom d'un appareil, et s'intercaler. Le verrou ferme cette porte.
+distribue les clés publiques et les règles : un serveur piraté pourrait annoncer
+sa propre clé sous le nom d'un appareil, s'ouvrir les ports de tous, ou faire
+revenir un appareil banni. Le verrou ferme ces portes. Mode d'emploi :
+[`verrou.md`](verrou.md).
 
-- L'admin a une clé de signature **Ed25519**, gardée hors du serveur.
-- Il signe, pour chaque appareil accepté, `"CyberSas verrou v1\0" || clé publique (32) || adresse IPv4 (4)`.
-  La clé et l'adresse vont ensemble : une signature ne peut pas resservir pour
-  une autre adresse.
-- Chaque appareil retient la clé publique du verrou à l'inscription (l'admin
-  peut la lui donner d'avance, sinon il retient la première annoncée). Ensuite,
-  il refuse tout pair dont la signature ne vérifie pas, même présenté par le
-  serveur, et refuse tout changement ou toute disparition du verrou.
-- La clé publique du serveur est retenue de la même façon : un serveur qui en
-  annoncerait une autre serait refusé.
+L'admin a une clé de signature **Ed25519**, gardée hors du serveur. Il signe
+trois sortes de documents, chacune avec son propre contexte, pour qu'une
+signature faite pour l'une ne serve jamais pour une autre :
+
+- **Un certificat par appareil** :
+  `"CyberSas certificat v2\0" || clé (32) || adresse IPv4 (4) || expiration (8) || étiquette || propriétaire || groupe`,
+  chaque texte précédé de sa longueur. Tout ce qui décide des règles d'un
+  appareil est dedans : le serveur ne peut ni déplacer une clé signée vers une
+  autre adresse, ni changer son étiquette ou son groupe. Il expire au bout de
+  90 jours.
+- **La politique**, octet pour octet, avec son numéro de version :
+  `"CyberSas politique v1\0" || version (8) || fichier`.
+- **La liste des clés révoquées**, triée, avec son numéro de version :
+  `"CyberSas revocations v1\0" || version (8) || clés`.
+
+Chaque appareil retient la clé publique du verrou à l'inscription (l'admin peut
+la lui donner d'avance, sinon il retient la première annoncée). Ensuite :
+
+- il refuse tout pair sans certificat valide, expiré, ou révoqué, même présenté
+  par le serveur ;
+- il calcule ses règles d'entrée lui-même, à partir de la politique signée et
+  des certificats, dont le sien : sans certificat pour lui-même, rien n'entre ;
+- il n'accepte jamais une politique ou une liste de révocation plus ancienne que
+  la dernière vue, et garde les versions vues sur disque ;
+- il refuse tout changement ou toute disparition du verrou, et de la clé du
+  serveur, même en se réinscrivant, sauf si on le lui demande explicitement.
 
 ## Itinérance et reprise
 
@@ -236,10 +283,11 @@ sous le nom d'un appareil, et s'intercaler. Le verrou ferme cette porte.
   exemple. Seul un paquet authentifié, et jamais vu, peut déplacer son adresse.
 - Si un initiateur envoie des données et ne reçoit rien pendant **15 secondes**,
   il rouvre une session sans attendre. C'est ce qui fait revenir les appareils
-  seuls quand le serveur redémarre (22 secondes mesurées dans le labo).
-- Un pair qui a reçu des données et n'a rien renvoyé depuis **10 secondes**
-  envoie un paquet vide : l'autre sait que la liaison vit. Le serveur répond de
-  même aux maintiens des clients.
+  seuls quand le serveur redémarre (moins de 25 secondes mesurées dans le labo).
+- Un pair qui a reçu des données, et n'a rien renvoyé **10 secondes** après la
+  première d'entre elles, envoie un paquet vide : l'autre sait que la liaison
+  vit, même pendant un flux continu à sens unique. Le serveur répond de même aux
+  maintiens des clients.
 - Le client redemande l'état du réseau toutes les dix secondes, et l'adresse du
   serveur avec : un changement d'IP ne le perd pas.
 
@@ -249,7 +297,7 @@ sous le nom d'un appareil, et s'intercaler. Le verrou ferme cette porte.
 - **Pas de liaison directe** entre appareils : tout passe par le relais du
   serveur, chiffré de bout en bout. Plus simple et plus fiable derrière
   n'importe quelle box, au prix d'un détour.
-- **Aucun audit externe.** Les tests prouvent que la poignée de main suit la
+- **Aucun audit humain.** Les tests prouvent que la poignée de main suit la
   spécification et que les attaques connues sont refusées, et des relecteurs
-  indépendants ont passé le code au crible (voir [`audit.md`](audit.md)). Cela
-  ne remplace pas le regard d'un cryptographe.
+  automatiques indépendants ont passé le code au crible (voir
+  [`audit.md`](audit.md)). Cela ne remplace pas le regard d'un cryptographe.

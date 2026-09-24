@@ -1,0 +1,449 @@
+# Audit de sécurité
+
+Ce document rend compte de la relecture de sécurité de CyberSas, menée le
+24 septembre 2026 : qui a relu quoi, ce qui a été trouvé, ce qui a été
+corrigé, et ce qui reste.
+
+## Ce que cet audit est, et ce qu'il n'est pas
+
+Ce n'est **pas** un audit par un cabinet ou un cryptographe indépendant. Tout
+a été fait par des outils et des relecteurs automatiques, sans humain
+extérieur. Cela ne remplace pas le regard d'un expert, et ce document ne
+prétend pas le contraire.
+
+Ce qui a été fait, en revanche, l'a été sérieusement, et chaque affirmation
+ci-dessous est vérifiable dans le dépôt :
+
+1. **Vérifications de conformité** de la cryptographie, avant tout audit :
+   - la poignée de main Noise IK comparée octet pour octet au vecteur de test
+     officiel du projet Noise (cacophony) : messages, hachage final et
+     messages de transport ;
+   - la même poignée de main confrontée, dans les deux sens, à une
+     implémentation indépendante ([flynn/noise](https://github.com/flynn/noise)) ;
+   - le fuzzing du moteur : 27,5 millions de messages forgés en une minute
+     sur le point d'entrée réseau, sans une panique ni un paquet produit.
+2. **Trois relecteurs indépendants**, lancés en parallèle, sans contexte sur
+   le projet, chacun sur un périmètre, avec la consigne d'attaquer et de
+   prouver par un test ce qu'ils avancent :
+   - le protocole et la cryptographie (`internal/noise`, `internal/tunnel`) ;
+   - le serveur (API, politique, base, DNS, verrou) ;
+   - les clients et le déploiement (Docker, Nginx, oauth2-proxy, scripts).
+3. **Une revue de sécurité** de toutes les corrections, suivie d'une
+   vérification indépendante de chaque constat pour écarter les faux
+   positifs.
+4. **Les corrections**, chacune accompagnée d'un test de non-régression
+   quand c'est possible. Ils s'appellent `TestAudit…` dans le code, ou sont
+   cités ci-dessous.
+
+**Résultat** : 46 constats, dont 3 de gravité haute : 11 sur le protocole,
+16 sur le serveur (9 constats et 7 durcissements), 17 sur les clients et le
+déploiement, et 2 dans la revue des corrections. Tous sont traités :
+corrigés, ou acceptés en connaissance de cause et expliqués. Après
+correction, 67 tests Go et 18 vérifications de bout en bout dans le labo
+passent, sous le détecteur d'accès concurrents de Go.
+
+## Relancer les preuves
+
+```bash
+go test -race ./...                                        # 67 tests, dont ceux de l'audit
+go test -run '^$' -fuzz=FuzzRecevoir -fuzztime=60s ./internal/tunnel
+bash scripts/sas.sh essai                                  # 18 vérifications dans le labo
+```
+
+## Protocole et cryptographie
+
+Le relecteur juge sains, après vérification : l'assemblage Noise IK
+(ordre des jetons, HKDF, nonces, Split), l'absence de réutilisation de nonce,
+la fenêtre anti-rejeu, la séparation des chemins direct et relayé, les
+trames de relais (pas d'imbrication, pas d'amplification), mac1 et mac2
+conformes à WireGuard, la lecture des paquets IPv4, et l'ordre des verrous.
+Ses constats :
+
+### T1. La destination des paquets reçus n'était pas vérifiée
+
+- **Gravité** : moyenne à haute. Prouvé.
+- **Le problème** : un appareil vérifiait la source d'un paquet reçu et son
+  port, mais pas sa destination. Autorisé sur le TCP 80 de la maison, un pair
+  pouvait lui envoyer un paquet pour 192.168.1.50:80 : écrit sur l'interface,
+  il partait vers le réseau local de la maison.
+- **Correction** : le moteur connaît sa propre adresse et rejette tout paquet
+  qui ne lui est pas destiné, avant le filtre (`moteur.go`, `recevoirDonnees`).
+- **Test** : `TestAuditDestinationVerifiee`.
+
+### T2. Une réponse forgée cassait la poignée de main en cours
+
+- **Gravité** : moyenne. Prouvé.
+- **Le problème** : `LireMessage2` mélangeait la réponse dans l'état Noise avant
+  d'en vérifier le tag. Une seule réponse forgée, facile à produire pour qui
+  observe le réseau et connaît la clé publique du client, corrompait l'état :
+  la vraie réponse était ensuite refusée, et le client ne pouvait plus se
+  connecter.
+- **Correction** : la lecture travaille sur une copie de l'état, qui ne
+  remplace l'original qu'en cas de succès, comme dans WireGuard. En direct,
+  une réponse doit en plus venir de l'adresse où l'initiation est partie.
+- **Test** : `TestReponseForgeeNeCassePasLaPoignee`.
+
+### T3. La limite de débit se contournait en IPv6
+
+- **Gravité** : moyenne. Prouvé.
+- **Le problème** : un seau de jetons par adresse. Qui possède un /64
+  possède des milliards d'adresses, donc autant de seaux.
+- **Correction** : un seau par /64 en IPv6, par /32 en IPv4. Table pleine :
+  les seaux inactifs sont oubliés au lieu de refuser les nouveaux venus.
+- **Test** : `TestAuditSeauParReseauIPv6`.
+
+### T4. Les poignées de main relayées n'étaient pas limitées
+
+- **Gravité** : moyenne à basse. Prouvé.
+- **Le problème** : relayées par le serveur, elles échappent aux cookies. Un
+  appareil relié à un autre pouvait lui en envoyer en boucle, et épuiser son
+  processeur et sa batterie.
+- **Correction** : un seau par pair chez le client, et un par couple
+  d'appareils chez le serveur, qui ne relaie plus au-delà.
+- **Test** : `TestAuditInitiationsRelayeesLimitees`.
+
+### T5. Un pair pouvait remplir le suivi des connexions d'un autre
+
+- **Gravité** : basse à moyenne.
+- **Le problème** : une seule table pour tous les pairs, remplie aussi par
+  nos réponses aux connexions qu'une règle laisse entrer. Un pair autorisé
+  pouvait la saturer, et les réponses venant des autres étaient refusées.
+- **Correction** :
+  - un budget d'entrées par pair ;
+  - les réponses à ce qu'une règle autorise déjà ne sont plus retenues ;
+  - une réponse n'est acceptée que du pair à qui l'on a écrit.
+- **Tests** : `TestAuditSuiviBudgetParPair`, `TestAuditReponseAutoriseeNonRetenue`.
+
+### T6. Un flux à sens unique relançait une poignée de main toutes les 15 secondes
+
+- **Gravité** : basse. Prouvé.
+- **Correction** : le maintien passif part à la première donnée reçue depuis
+  notre dernier envoi, sans se réarmer à chaque paquet.
+- **Test** : `TestAuditFluxSensUnique`.
+
+### T7. Après un abandon, les tentatives ne repartaient pas de zéro
+
+- **Gravité** : basse. Prouvé.
+- **Test** : `TestAuditDebutTentativesRemis`.
+
+### T8. Un pair retiré pendant sa poignée de main pouvait revenir
+
+- **Gravité** : basse.
+- **Correction** : un drapeau `retire`, vérifié avant toute inscription dans
+  la table des indices.
+- **Test** : `TestAuditIndices`.
+
+### T9. Pas de détection de collision d'indice
+
+- **Gravité** : basse.
+- **Correction** : l'indice est retiré au sort tant qu'il est pris ou nul.
+- **Test** : `TestAuditIndices`.
+
+### T10. Le suivi ICMP laissait entrer n'importe quel type
+
+- **Gravité** : basse.
+- **Correction** : seule la réponse d'écho (type 0) entre en retour d'une
+  demande d'écho (type 8).
+- **Test** : `TestAuditSuiviICMP`.
+
+### T11. Informations
+
+- **Horodatage trop précis**, qui renseignait sur l'horloge de l'appareil :
+  arrondi à 2^24 nanosecondes, comme WireGuard. Corrigé.
+- **Un cookie peut être forgé** par un observateur du réseau, et forcer des
+  relances : comme dans WireGuard, sans gravité. Accepté.
+- **L'itinérance suit l'initiation** avant toute preuve de possession des
+  clés : conforme à WireGuard, d'impact faible. Accepté.
+- **Clé du répondeur compromise (KCI)** : pas de session possible, la
+  promotion exige le premier paquet de données. Accepté.
+- **Le numéro d'appareil n'est pas signé** : sans conséquence, l'identité
+  reste liée à la clé. Accepté.
+- **Documentation en retard sur le code** : mise à jour.
+
+## Serveur
+
+Le relecteur juge sains : l'absence d'injection SQL (requêtes paramétrées)
+et nftables (seulement des adresses et des entiers), les jetons (256 bits,
+stockés hachés), l'usage unique des clés d'inscription, le refus des points
+faibles de X25519, et la politique elle-même. Ses constats :
+
+### S1. Retirer quelqu'un de l'équipe ne le coupait pas
+
+- **Gravité** : haute. Prouvé.
+- **Le problème** : Docker monte un fichier seul par son inode. Or `sas.sh`
+  écrit la liste de l'équipe à côté, puis la renomme : le conteneur continuait
+  à lire l'ancienne. La personne retirée gardait ses sessions, son jeton
+  d'API, et pouvait même inscrire de nouveaux appareils. Côté web, elle était
+  bien coupée, ce qui donnait à l'admin l'illusion qu'elle l'était partout.
+- **Correction** : les dossiers sont montés, pas les fichiers.
+- **Test** : dans le labo, « retirée de l'équipe, la personne perd ses
+  appareils en quelques secondes ».
+
+### S2. Une politique cassée bloquait toutes les révocations
+
+- **Gravité** : moyenne. Prouvé.
+- **Le problème** : une faute de frappe dans `politique.json` arrêtait la
+  synchronisation avant la purge. Les appareils des personnes retirées
+  restaient actifs.
+- **Correction** : les retraits passent d'abord, quoi qu'il arrive à la
+  politique. Une politique illisible est remplacée par la dernière lue avec
+  succès.
+- **Test** : `TestAuditPolitiqueCasseeNeBloquePasLesRetraits`.
+
+### S3. Un appareil pouvait prendre le nom « serveur » ou « maison »
+
+- **Gravité** : moyenne. Prouvé.
+- **Le problème** : les noms DNS du VPN se prenaient au premier arrivé. Un
+  membre qui nommait son appareil « serveur » recevait ce que les admins
+  envoyaient au serveur, leurs identifiants SSH par exemple.
+- **Correction** :
+  - des noms réservés (`serveur`, `vpn`, `auth`), posés en dernier dans le DNS ;
+  - les noms des machines fixés par l'admin dans la clé d'inscription, et
+    refusés s'ils sont pris ;
+  - les noms des appareils personnels toujours suffixés de leur propriétaire
+    (`portable-alice`).
+- **Test** : `TestAuditNomsReserves`.
+
+### S4. Une équipe illisible un instant effaçait tous les appareils personnels
+
+- **Gravité** : moyenne. Prouvé.
+- **Correction** :
+  - la dernière équipe lue avec succès reste en vigueur ;
+  - une purge qui retirerait d'un coup plus de la moitié des appareils est
+    refusée et signalée. Les appareils concernés sont coupés, mais pas
+    effacés.
+- **Tests** : `TestAuditEquipeIllisibleNEfacePas`, `TestAuditPurgeMassiveRefusee`.
+
+### S5. Les signatures du verrou ne s'annulaient jamais
+
+- **Gravité** : basse à moyenne. Même constat que C3.
+- **Correction** : voir C2 et C3.
+
+### S6. Un pare-feu en échec laissait un état incohérent
+
+- **Gravité** : basse. Prouvé.
+- **Correction** : le pare-feu est appliqué en premier. S'il échoue, aucun
+  nouvel appareil n'est activé ; seuls les retraits s'appliquent.
+- **Test** : `TestAuditPareFeuEnEchec`.
+
+### S7. Les numéros et les adresses étaient réutilisés
+
+- **Gravité** : basse. Prouvé.
+- **Le problème** : le dernier appareil retiré et le suivant inscrit
+  recevaient le même numéro et la même adresse. Un pair qui n'avait pas encore
+  rafraîchi ses règles les appliquait au nouveau venu.
+- **Correction** : numéros jamais redonnés (`AUTOINCREMENT`), adresses
+  attribuées en tourniquet.
+- **Test** : `TestAuditNumeroEtAdresseNonReutilises`.
+
+### S8. La preuve de possession n'était pas liée au justificatif
+
+- **Gravité** : basse.
+- **Le problème** : la preuve couvrait la clé et l'horodatage, pas le jeton
+  Google ni la clé d'inscription. Et une demande capturée se rejouait pendant
+  cinq minutes.
+- **Correction** : la preuve couvre toute la demande (justificatif, nom,
+  système). Une preuve qui a servi à une inscription réussie est retenue et
+  refusée ensuite.
+- **Tests** : `TestPreuve`, `TestRejeux`, `TestInscriptionEtPreuve`.
+
+### S9. Une clé d'inscription était perdue quand l'inscription échouait
+
+- **Gravité** : basse. Prouvé.
+- **Correction** : la clé est consommée dans la même transaction que
+  l'inscription.
+- **Test** : `TestAuditCleNonConsommeeSurRefus`.
+
+### Durcissements
+
+- **DNS** : chaque appareil ne résout que les noms des appareils avec qui il
+  est relié. Les autres n'existent pas pour lui. Test : `TestAuditDNSFiltre`.
+- **État du réseau** : une machine ne voit plus les adresses email des
+  personnes, ni le système ou l'expiration des autres appareils. Test :
+  `TestReseauNeMontreQueLesPairsRelies`.
+- **Google** :
+  - l'identifiant permanent du compte (`sub`) est fixé à la première
+    inscription, pour qu'une adresse recyclée n'ouvre pas l'accès de l'ancien
+    titulaire ;
+  - la partie autorisée du jeton (`azp`) est vérifiée.
+- **SQLite** : transactions immédiates, pour que deux inscriptions
+  simultanées ne prennent pas la même adresse.
+- **Pare-feu** : une adresse du VPN ne se joint que par l'interface du VPN.
+- **Nom et système** d'un appareil : bornés, et sans caractère de contrôle.
+- **API** : délais de lecture et d'écriture.
+
+## Clients et déploiement
+
+Le relecteur juge sains : Nginx qui coupe les noms inconnus, le refus des
+redirections vers un autre domaine, oauth2-proxy tombé qui refuse au lieu de
+laisser passer, et l'absence de secret dans l'historique git. Ses constats :
+
+### C1. La signature du verrou se faisait à l'aveugle
+
+- **Gravité** : haute.
+- **Le problème** : `sas.sh signer` signait tout appareil non signé que le
+  serveur listait. Un serveur piraté n'avait qu'à inscrire sa machine : la
+  prochaine signature de routine la validait. Et la clé du verrou était créée
+  sur le serveur lui-même.
+- **Correction** :
+  - l'admin ne signe que les clés qu'il désigne, lues sur les appareils
+    eux-mêmes (`sas etat`, ou l'écran de l'appli) ;
+  - la clé du verrou ne se crée plus sur le serveur hors du labo, et le script
+    refuse de s'en servir s'il en trouve une ;
+  - tout texte venu du serveur est nettoyé avant affichage, pour qu'un
+    serveur ne puisse pas maquiller le terminal de l'admin.
+- **Procédure** : [`verrou.md`](verrou.md).
+
+### C2. La politique n'était pas signée : un serveur piraté pouvait ouvrir tous les ports
+
+- **Gravité** : haute. Prouvé.
+- **Le problème** : les règles d'entrée venaient du serveur sans signature. Un
+  serveur piraté pouvait se donner « tout » en entrée sur chaque appareil, avec
+  ou sans verrou.
+- **Correction** : le verrou change de nature.
+  - l'admin signe la politique elle-même, avec un numéro de version ;
+  - chaque certificat d'appareil couvre désormais son étiquette, son
+    propriétaire, son groupe et une date d'expiration ;
+  - avec un verrou, chaque appareil **calcule lui-même** ses règles d'entrée
+    à partir de la politique signée et des certificats signés ;
+  - tout ce que le serveur dit sans signature est ignoré.
+- **Test** : `TestVerrouReglesCalculeesLocalement`. Un serveur qui s'ouvre tous
+  les ports n'obtient que ce que la politique signée lui donne.
+
+### C3. Aucune révocation
+
+- **Gravité** : moyenne.
+- **Correction** :
+  - une liste de révocation signée par le verrou et numérotée ; chaque
+    appareil garde la plus récente vue, et n'accepte jamais une version plus
+    ancienne ;
+  - les certificats expirent au bout de 90 jours ;
+  - de même, une politique plus ancienne que la dernière vue est refusée.
+- **Test** : `TestVerrouRevocationsEtRetourEnArriere`.
+
+### C4. Un pair annoncé en IPv6 faisait planter tout client verrouillé
+
+- **Gravité** : moyenne. Prouvé.
+- **Correction** : seules les adresses IPv4 du réseau sont acceptées, et la
+  signature d'une adresse non IPv4 rend une erreur au lieu de planter.
+- **Tests** : `TestVerrouAdressesInvalides`, `TestAdresseIPv6Refusee`.
+
+### C5. Les en-têtes d'identité étaient falsifiables en direct
+
+- **Gravité** : moyenne. Prouvé.
+- **Le problème** : Nginx transmet l'adresse Google dans `X-Email`. Mais le même
+  service était joignable directement dans le VPN, où n'importe quel membre
+  pouvait écrire cet en-tête lui-même.
+- **Correction** : Nginx publie un port réservé au serveur (8081), que la
+  politique n'ouvre à personne d'autre. Seul ce port peut croire `X-Email`.
+- **Test** : dans le labo, « le port publié de la maison est fermé au poste ».
+
+### C6. Se réinscrire effaçait la clé du serveur et le verrou retenus
+
+- **Gravité** : moyenne.
+- **Correction** : la réinscription refuse un autre serveur ou un autre
+  verrou, y compris la disparition du verrou, sauf avec `--oublier`.
+
+### C7. Le client acceptait http:// en clair
+
+- **Gravité** : moyenne. Prouvé.
+- **Correction** : `https://` obligatoire. Aucune redirection n'est suivie,
+  pour que le jeton ne parte pas ailleurs.
+- **Test** : `TestAPIRefuseHTTP`.
+
+### C8. Le cookie de session partait vers les services publiés
+
+- **Gravité** : moyenne.
+- **Correction** :
+  - Nginx retire le cookie d'oauth2-proxy avant de transmettre la requête ;
+  - hors labo, le script impose un sous-domaine dédié (`sas.exemple.fr`), pour
+    que le cookie ne parte pas vers les autres sites du domaine principal.
+
+### C9. L'autorité du labo pouvait signer pour n'importe quelle adresse IP
+
+- **Gravité** : moyenne. Prouvé.
+- **Correction** : les contraintes de noms excluent toute adresse IPv4 et
+  IPv6.
+
+### C10 à C17. Durcissements du déploiement
+
+- **Secrets lisibles par tous** sur l'hôte : `umask 077`, et oauth2-proxy
+  tourne sous l'utilisateur de l'admin.
+- **Création de la clé du verrou** : atomique (`O_EXCL`), jamais par-dessus une
+  clé existante.
+- **Conteneurs** :
+  - aucune capacité par défaut, seules celles nécessaires rendues ;
+  - pas d'élévation de privilèges, systèmes de fichiers en lecture seule ;
+  - images épinglées par empreinte ;
+  - plus de routage IP sur le serveur.
+- **Nginx** :
+  - seul le WebSocket peut changer de protocole ;
+  - tampons ramenés aux valeurs par défaut ;
+  - en-têtes posés explicitement vers oauth2-proxy.
+- **Secrets en argument de commande** : le secret Google se tape au clavier,
+  la clé d'inscription passe par `SAS_CLE`.
+- **Le script d'essai en production** : refusé hors labo, et `TLS` n'a plus de
+  valeur par défaut.
+- **Robustesse du client** :
+  - réponses de l'API limitées à 1 Mo ;
+  - état écrit sur disque avec synchronisation ;
+  - texte du serveur nettoyé avant affichage ;
+  - `ip` appelé par son chemin absolu.
+
+## Revue de sécurité des corrections
+
+Une revue de sécurité a relu toutes les corrections, et un vérificateur
+indépendant a contrôlé chacun de ses constats.
+
+### R1. Une clé révoquée pouvait revenir sous une autre écriture
+
+- **Gravité** : moyenne, haute dans le modèle du verrou. Confirmé par un test
+  (8 sur 10).
+- **Le problème** : une clé de 32 octets a plusieurs écritures base64 valides,
+  car le décodeur standard de Go ignore les bits de bourrage. La révocation
+  comparait les clés sous forme de texte. Un serveur piraté pouvait donc
+  réannoncer un appareil révoqué avec une autre écriture de sa clé : absente,
+  en texte, de la liste de révocation, mais identique une fois décodée.
+- **Correction** : un seul décodeur, [`internal/b64`](../internal/b64), qui
+  n'accepte une chaîne que si la réencoder redonne la même. Il est employé
+  partout où une clé, une signature ou une preuve arrive de l'extérieur. Et
+  les révocations se comparent sur les octets.
+- **Tests** : `TestRevocationEcritureNonCanonique`, `TestUneSeuleEcriture`.
+
+### R2. La même faiblesse dans le cache anti-rejeu des inscriptions
+
+- **Jugé non exploitable en pratique** (3 sur 10) : il faudrait lire le corps
+  d'une inscription réussie, qui ne circule en clair que sur l'interface
+  locale du serveur.
+- Corrigé quand même, par le même décodeur canonique.
+
+## Trouvé pendant les corrections
+
+- **Un client réinscrit gardait son ancienne adresse** sur l'interface, en plus
+  de la nouvelle, et continuait d'émettre avec. Les pairs rejetaient ces
+  paquets comme usurpés : le filtre a fait son travail, mais le client était
+  coupé. Corrigé : l'interface est vidée avant de recevoir sa nouvelle
+  adresse.
+- **La première version du cache anti-rejeu** retenait aussi les demandes
+  refusées : réessayer une inscription juste après un refus devenait
+  impossible. Corrigé : seules les preuves d'inscriptions réussies sont
+  retenues.
+
+## Ce qui reste
+
+- **Aucun audit humain.** C'est la prochaine étape sérieuse avant de confier au
+  VPN des données dont la fuite serait grave.
+- **Les métadonnées** : le serveur voit qui parle à qui, quand et combien.
+- **Les pages publiées par Nginx** sont déchiffrées sur le serveur, puisque le
+  TLS s'y termine. Passer par le VPN garde le chiffrement de bout en bout.
+- **Le premier contact** : un appareil à qui l'on ne donne pas la clé du verrou
+  d'avance retient la première annoncée.
+- **Google**, tiers de confiance pour les inscriptions.
+- **La limite de débit de Nginx** voit toutes les connexions sous la même
+  adresse quand Docker passe par son mandataire (IPv6 publié, par exemple). À
+  régler au déploiement (`userland-proxy: false`).
+- **L'adresse de retour après connexion web** n'est pas encodée : un « & »
+  dans l'adresse d'origine la tronque. C'est un défaut fonctionnel, sans
+  conséquence de sécurité, puisque la liste des domaines permis tient.
+- **Pas de liaison directe** entre appareils, et **IPv4 seulement** dans le
+  tunnel.

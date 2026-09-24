@@ -40,6 +40,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Cybertrist/CyberSas/internal/b64"
+
 	"github.com/Cybertrist/CyberSas/internal/client"
 	"github.com/Cybertrist/CyberSas/internal/noise"
 	"github.com/Cybertrist/CyberSas/internal/politique"
@@ -190,7 +192,7 @@ func rejoindre(args []string) {
 	// On garde la clé déjà générée : se réinscrire ne change pas d'adresse.
 	ancien, dejaInscrit := lireEtat()
 	var brut []byte
-	if k, err := base64.StdEncoding.DecodeString(ancien.ClePrivee); err == nil && len(k) == 32 {
+	if k, err := b64.Decoder(ancien.ClePrivee); err == nil && len(k) == 32 {
 		brut = k
 	} else {
 		k, err := noise.GenererCle()
@@ -331,7 +333,7 @@ func demon() error {
 				journal.Error("état illisible", "erreur", err)
 				break
 			}
-			brut, err1 := base64.StdEncoding.DecodeString(e.ClePrivee)
+			brut, err1 := b64.Decoder(e.ClePrivee)
 			k, err2 := noise.ClePrivee(brut)
 			if err1 != nil || err2 != nil {
 				journal.Error("clé privée illisible")
@@ -424,7 +426,7 @@ func lireVerrou(fichier string) ed25519.PrivateKey {
 	if err != nil {
 		meurt("%v", err)
 	}
-	graine, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(texte)))
+	graine, err := b64.Decoder(strings.TrimSpace(string(texte)))
 	if err != nil || len(graine) != ed25519.SeedSize {
 		meurt("clé de verrou illisible")
 	}
@@ -502,7 +504,7 @@ func cmdVerrou(args []string) {
 		}
 		var brutes [][32]byte
 		for _, c := range l.Cles {
-			b, err := base64.StdEncoding.DecodeString(c)
+			b, err := b64.Decoder(c)
 			if err != nil || len(b) != 32 {
 				meurt("clé illisible : %s", c)
 			}
@@ -543,7 +545,7 @@ func signer(prive ed25519.PrivateKey, cles string, duree time.Duration) {
 			continue
 		}
 		delete(voulues, a.ClePublique)
-		k, err := base64.StdEncoding.DecodeString(a.ClePublique)
+		k, err := b64.Decoder(a.ClePublique)
 		adresse, err2 := netip.ParseAddr(a.Adresse)
 		if err != nil || err2 != nil || len(k) != 32 || !adresse.Is4() {
 			fmt.Fprintf(os.Stderr, "ignoré, illisible : %s\n", client.Propre(a.Nom))

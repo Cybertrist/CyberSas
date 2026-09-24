@@ -62,7 +62,11 @@ privée. Et une clé inscrite ne change jamais de propriétaire.
 appareil est compromis. Il n'atteint que ce que la politique autorise : le
 serveur ne relaie pas vers les appareils sans relation avec lui, et ceux qui en
 ont filtrent eux-mêmes ce qui entre. Il ne peut pas usurper l'adresse d'un autre
-appareil. Le retirer de la liste coupe ses appareils en cinq secondes.
+appareil, ni se servir d'un appareil qui l'accepte comme routeur vers le réseau
+local de celui-ci. Il ne peut pas prendre le nom d'une machine ou du serveur
+dans le DNS du VPN, ni écrire lui-même les en-têtes d'identité qu'un service
+publié croit : le port publié n'est ouvert qu'au serveur. Le retirer de la liste
+coupe ses appareils en cinq secondes.
 
 **Un service de la maison compromis.** Il ne peut se retourner vers aucun
 appareil : aucune règle ne part de `etiquette:maison`, et les appareils
@@ -72,17 +76,28 @@ refusent ce qu'il tenterait d'ouvrir chez eux.
 
 ## Si le VPS tombe aux mains d'un attaquant
 
-Grâce au bout en bout et au verrou, bien moins qu'avant :
+Grâce au bout en bout et au verrou, bien moins qu'avant. Tout ce qui suit
+suppose le verrou en place ; sans lui, le serveur est cru sur parole.
 
 - Il **ne lit pas** le trafic entre appareils.
 - Il **ne peut pas s'intercaler** entre deux appareils : pour se faire passer
-  pour l'un d'eux, il lui faudrait une clé signée par le verrou, dont la clé
-  privée n'a jamais touché le serveur. Les appareils refusent aussi tout
-  changement de la clé du serveur ou du verrou.
-- Il peut **inscrire ses propres appareils**, mais sans signature, les autres
+  pour l'un d'eux, il lui faudrait un certificat signé par le verrou, dont la
+  clé privée n'a jamais touché le serveur. Les appareils refusent aussi tout
+  changement de la clé du serveur ou du verrou, même en se réinscrivant.
+- Il **ne peut pas ouvrir de port** : chaque appareil calcule ses règles
+  d'entrée lui-même, à partir de la politique signée par l'admin et des
+  certificats. Resservir une ancienne politique plus permissive ne marche pas
+  non plus : les appareils n'acceptent jamais une version plus ancienne que la
+  dernière vue.
+- Il **ne peut pas faire revenir un appareil banni** : la liste de révocation
+  est signée, et ne recule jamais. Un certificat expire de toute façon au bout
+  de 90 jours.
+- Il peut **inscrire ses propres appareils**, mais sans certificat, les autres
   les refusent.
-- Il peut **couper** le réseau : ne plus relayer, ou modifier la politique pour
-  retirer des relations. Un serveur a toujours ce pouvoir-là.
+- Il peut **couper** le réseau : ne plus relayer, ou cesser de transmettre les
+  mises à jour signées. Un serveur a toujours ce pouvoir-là. Un appareil qui n'a
+  jamais vu une nouvelle révocation ne peut pas l'appliquer : c'est la raison
+  d'être de l'expiration des certificats.
 - Il **lit en clair** ce qui s'adresse au serveur lui-même : le DNS du réseau,
   et les pages publiées par Nginx sur `maison.`, puisque le TLS se termine sur
   le VPS. Pour ces pages, passer par le VPN plutôt que par la page publique

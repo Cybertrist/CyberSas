@@ -45,7 +45,9 @@ VERROU="$ETAT/verrou"
 LABO=(docker compose -f labo/maison.yaml)
 
 dit ()    { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
-ok ()     { printf '  \033[32mok\033[0m  %s\n' "$*"; }
+# ok réussit toujours : dans « test && ok ... || rate ... », rate ne
+# s'exécute donc que si le test a échoué.
+ok ()     { printf '  \033[32mok\033[0m  %s\n' "$*" || true; }
 rate ()   { printf '  \033[31mKO\033[0m  %s\n' "$*"; ECHECS=$((ECHECS+1)); }
 meurt ()  { printf '\033[31merreur :\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -226,7 +228,8 @@ cmd_retirer () {
 verrou_admin () {
   [ -f "$VERROU/cle" ] || meurt "pas de clé privée du verrou sur cette machine, et c'est normal hors du labo : signer depuis l'ordinateur de l'admin (docs/verrou.md)"
   [ "$TLS" = labo ] || meurt "une clé privée de verrou traîne dans $VERROU sur le serveur : la déplacer sur l'ordinateur de l'admin"
-  local v; v="$(cd "$VERROU" && pwd -W 2>/dev/null || pwd)"
+  # pwd -W donne le chemin Windows sous Git Bash ; ailleurs, pwd suffit.
+  local v; v="$(cd "$VERROU" && { pwd -W 2>/dev/null || pwd; })"
   docker run --rm -i -v "$v:/verrou:ro" cybersas:dev sas verrou "$@" --fichier /verrou/cle
 }
 
@@ -261,8 +264,8 @@ cmd_revoquer () {
 # --- démarrage ---------------------------------------------------------------
 
 attendre_sasd () {
-  local i
-  for i in $(seq 1 60); do
+  local _
+  for _ in $(seq 1 60); do
     docker compose exec -T sasd wget -qO- http://127.0.0.1:8080/api/v1/sante >/dev/null 2>&1 && return 0
     sleep 2
   done
@@ -279,6 +282,10 @@ cmd_demarrer () {
   if [ "$TLS" = labo ] && { [ ! -f politique/politique.sig ] || [ politique/politique.json -nt politique/politique.sig ]; }; then
     cmd_politique
   fi
+  # Nginx ne relit ses modèles qu'en démarrant : l'empreinte force compose
+  # à le recréer quand l'un d'eux a changé (voir compose.yaml).
+  SAS_EMPREINTE_NGINX="$(find nginx -type f | LC_ALL=C sort | xargs cat | sha256sum | cut -c1-16)"
+  export SAS_EMPREINTE_NGINX
   docker compose up -d
   attendre_sasd
   ok "sasd répond"
@@ -315,6 +322,7 @@ cmd_labo () {
 
 # --- essais -----------------------------------------------------------------
 
+# shellcheck disable=SC2015 # ok réussit toujours, voir sa définition.
 cmd_essai () {
   charger_env; labo_seulement
   ECHECS=0
@@ -463,7 +471,7 @@ cmd_essai () {
   cmd_signer "$(cle_de poste)" >/dev/null 2>&1
 
   echo
-  [ "$ECHECS" -eq 0 ] && dit "Tout est conforme." || meurt "$ECHECS vérification(s) en échec."
+  if [ "$ECHECS" -eq 0 ]; then dit "Tout est conforme."; else meurt "$ECHECS vérification(s) en échec."; fi
 }
 
 # --- divers -----------------------------------------------------------------
@@ -471,8 +479,8 @@ cmd_essai () {
 cmd_etat ()      { charger_env; sasd appareils; }
 cmd_arreter ()   { charger_env; "${LABO[@]}" down 2>/dev/null || true; docker compose down; }
 
-c="${1:-}"; shift || true
-case "$c" in
+commande="${1:-}"; shift || true
+case "$commande" in
   init) cmd_init ;;
   google) charger_env; cmd_google "$@" ;;
   membre) charger_env; cmd_membre "$@" ;;

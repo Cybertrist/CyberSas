@@ -9,6 +9,12 @@ resolver 127.0.0.11 valid=10s ipv6=off;
 
 server_tokens off;
 
+# Les mêmes protocoles que tls.conf, mais pour tous les serveurs : avant de
+# lire le nom demandé (SNI), Nginx négocie avec les réglages du serveur par
+# défaut, qui n'inclut pas tls.conf.
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+
 # Seul « Upgrade: websocket » est transmis ; tout autre changement de
 # protocole est ignoré, et la connexion reste une simple requête HTTP.
 map $http_upgrade $upgrade_accepte {
@@ -54,10 +60,19 @@ server {
     return 444;
 }
 
-# En clair, on ne fait que rediriger.
+# En clair, on ne fait que rediriger, et seulement les noms servis en
+# HTTPS : la redirection reprend un nom de cette liste, jamais l'en-tête
+# Host tel qu'envoyé. Un service ajouté doit aussi être ajouté ici.
+map $host $nom_https {
+    hostnames;
+    default              "";
+    auth.${DOMAINE}      auth.${DOMAINE};
+    vpn.${DOMAINE}       vpn.${DOMAINE};
+    maison.${DOMAINE}    maison.${DOMAINE};
+}
 server {
     listen 80;
-    server_name ${DOMAINE} *.${DOMAINE};
+    server_name auth.${DOMAINE} vpn.${DOMAINE} maison.${DOMAINE};
 
-    location / { return 301 https://$host$request_uri; }
+    location / { return 301 https://$nom_https$request_uri; }
 }

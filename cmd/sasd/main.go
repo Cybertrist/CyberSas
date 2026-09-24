@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -59,8 +60,12 @@ type reglages struct {
 func config() reglages {
 	reseau := netip.MustParsePrefix(env("SAS_RESEAU", "10.77.0.0/24"))
 	domaine := env("SAS_DOMAINE", "sas.local")
-	port := 51820
-	fmt.Sscan(env("SAS_PORT", "51820"), &port)
+	// Un port mal écrit ne doit pas donner en silence le port par défaut :
+	// les appareils chercheraient le serveur ailleurs.
+	port, err := strconv.ParseUint(env("SAS_PORT", "51820"), 10, 16)
+	if err != nil || port == 0 {
+		meurt("SAS_PORT invalide : %q", os.Getenv("SAS_PORT"))
+	}
 	return reglages{
 		Config: serveur.Config{
 			Domaine:            domaine,
@@ -78,7 +83,7 @@ func config() reglages {
 		},
 		etat:   env("SAS_ETAT", "/var/lib/sasd"),
 		ecoute: env("SAS_ECOUTE", "127.0.0.1:8080"),
-		port:   port,
+		port:   int(port),
 	}
 }
 
@@ -155,6 +160,7 @@ func cmdAppareils(b *base.Base, cfg reglages, args []string) {
 		// signera, et qu'il voit avant de signer.
 		var r []protocole.Appareil
 		for _, a := range liste {
+			// #nosec G115 -- a.ID est borné par base.Enregistrer.
 			p := protocole.Appareil{Numero: uint32(a.ID), Nom: a.Nom, Adresse: a.Adresse.String(), ClePublique: a.ClePublique,
 				Proprietaire: a.Proprietaire, Etiquette: a.Etiquette, Systeme: a.Systeme, Groupe: equipe[a.Proprietaire],
 				SignatureExpire: a.SignatureExpire}

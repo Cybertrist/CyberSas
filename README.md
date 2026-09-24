@@ -118,7 +118,7 @@ L'essai vérifie entre autres que :
 - une personne retirée de l'équipe perd ses appareils en quelques secondes ;
 - après un redémarrage du serveur, les appareils reviennent seuls.
 
-Les tests du code se lancent à part : `go test -race ./...` (67 tests).
+Les tests du code se lancent à part : `go test -race ./...` (71 tests).
 
 ## Ajouter ou retirer quelqu'un
 
@@ -144,7 +144,10 @@ bash scripts/sas.sh google <id>.apps.googleusercontent.com   # le secret est dem
 
 CyberSas a été passé au crible par trois relecteurs indépendants puis par une
 revue de sécurité : 46 constats, dont 3 hauts, tous traités, chacun avec son
-test quand c'est possible. Le détail est dans [`docs/audit.md`](docs/audit.md),
+test quand c'est possible. Un deuxième audit l'a ensuite passé aux outils du
+métier (govulncheck, staticcheck, gosec, Semgrep, Trivy, Hadolint,
+ShellCheck, Gixy, fuzzing différentiel contre flynn/noise) : 10 constats de
+plus, corrigés. Le détail est dans [`docs/audit.md`](docs/audit.md),
 le modèle de menace dans [`docs/menaces.md`](docs/menaces.md).
 
 Ce qui reste vrai malgré tout :

@@ -43,7 +43,9 @@ func repondre(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	// L'en-tête est parti : si le client a raccroché, il n'y a plus
+	// personne à prévenir.
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func refuser(w http.ResponseWriter, code int, message string) {
@@ -203,6 +205,7 @@ func (s *Serveur) connexion(w http.ResponseWriter, r *http.Request) {
 // machine ne voit pas les adresses email des personnes.
 func (s *Serveur) vers(a, demandeur base.Appareil, poignee time.Time) protocole.Appareil {
 	moi := a.ID == demandeur.ID
+	// #nosec G115 -- a.ID est borné par base.Enregistrer.
 	r := protocole.Appareil{Numero: uint32(a.ID), Nom: a.Nom, Adresse: a.Adresse.String(), ClePublique: a.ClePublique,
 		Etiquette: a.Etiquette, Moi: moi, EnLigne: !poignee.IsZero() && time.Since(poignee) < 3*time.Minute,
 		Groupe: a.SignatureGroupe, SignatureExpire: a.SignatureExpire}
@@ -299,8 +302,18 @@ func (s *Serveur) deconnexion(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.base.Supprimer(moi.ID)
-	s.Synchroniser()
+	// Sans effacement, l'appareil croirait être parti alors que sa clé
+	// ouvrirait encore le tunnel : on le lui dit, il pourra réessayer.
+	if err := s.base.Supprimer(moi.ID); err != nil {
+		s.journal.Error("déconnexion impossible", "evenement", "deconnexion", "appareil", moi.Nom, "erreur", err)
+		refuser(w, http.StatusInternalServerError, "déconnexion impossible, réessayer")
+		return
+	}
+	// L'appareil est effacé de la base : si ce tour échoue, le suivant le
+	// retirera du tunnel quoi qu'il arrive.
+	if err := s.Synchroniser(); err != nil {
+		s.journal.Error("synchronisation après déconnexion", "evenement", "synchronisation", "erreur", err)
+	}
 	s.journal.Info("appareil déconnecté", "evenement", "deconnexion", "appareil", moi.Nom, "ip", ip(r))
 	repondre(w, http.StatusOK, map[string]string{"etat": "déconnecté"})
 }

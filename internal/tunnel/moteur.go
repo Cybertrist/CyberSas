@@ -331,11 +331,17 @@ func (m *Moteur) expedier(envois []envoi) {
 // trameRelais : zéro, réservé, longueur du message (2 octets, grand-
 // boutiste), numéro d'appareil (4 octets), puis le message. La longueur
 // permet d'écarter le remplissage ajouté par la couche transport.
-func trameRelais(numero uint32, msg []byte) []byte {
+//
+// Un message trop long pour tenir dans un clair est refusé ici, plutôt que
+// de laisser sa longueur déborder des deux octets : ok vaut alors false.
+func trameRelais(numero uint32, msg []byte) (trame []byte, ok bool) {
+	if len(msg) > tailleMaxClair-enteteRelais {
+		return nil, false
+	}
 	t := make([]byte, enteteRelais, enteteRelais+len(msg))
-	binary.BigEndian.PutUint16(t[2:4], uint16(len(msg)))
+	binary.BigEndian.PutUint16(t[2:4], uint16(len(msg))) // #nosec G115 -- borné juste au-dessus
 	binary.LittleEndian.PutUint32(t[4:8], numero)
-	return append(t, msg...)
+	return append(t, msg...), true
 }
 
 func lireTrame(t []byte) (numero uint32, msg []byte, ok bool) {
@@ -356,10 +362,11 @@ func (m *Moteur) relayer(numero uint32, msg []byte) {
 	m.mu.RLock()
 	s := m.serveur
 	m.mu.RUnlock()
-	if s == nil {
+	t, ok := trameRelais(numero, msg)
+	if s == nil || !ok {
 		return
 	}
-	m.expedier(m.envoyerClair(s, trameRelais(numero, msg)))
+	m.expedier(m.envoyerClair(s, t))
 }
 
 // envoyerClair chiffre un clair pour ce pair, avec la session courante.
@@ -816,7 +823,11 @@ func (m *Moteur) recevoirTrame(de *pair, trame []byte) []envoi {
 		if sonde := m.sondeRelais.Load(); sonde != nil {
 			(*sonde)(msg)
 		}
-		return m.envoyerClair(vers, trameRelais(source, msg))
+		t, ok := trameRelais(source, msg)
+		if !ok {
+			return nil
+		}
+		return m.envoyerClair(vers, t)
 	}
 	m.mu.RLock()
 	serveur := m.serveur

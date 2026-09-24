@@ -145,6 +145,18 @@ func (s *Serveur) chargerEquipe() politique.Equipe {
 	return e
 }
 
+// retirer efface un appareil de la base, et le dit au journal. Un
+// effacement raté est journalisé comme tel : l'appareil n'est alors plus
+// servi, mais sa fiche reste, et le prochain tour réessaiera.
+func (s *Serveur) retirer(a base.Appareil, raison string) {
+	if err := s.base.Supprimer(a.ID); err != nil {
+		s.journal.Error("effacement impossible", "evenement", "retrait", "appareil", a.Nom, "proprietaire", a.Proprietaire,
+			"raison", raison, "erreur", err)
+		return
+	}
+	s.journal.Warn("appareil retiré", "evenement", "retrait", "appareil", a.Nom, "proprietaire", a.Proprietaire, "raison", raison)
+}
+
 // Synchroniser remet le réseau en accord avec l'équipe, la politique et la
 // base. Elle ne touche au noyau que si quelque chose a changé.
 func (s *Serveur) Synchroniser() error {
@@ -168,8 +180,9 @@ func (s *Serveur) Synchroniser() error {
 		}
 		switch {
 		case !a.Expire.IsZero() && now.After(a.Expire):
-			s.base.Supprimer(a.ID)
-			s.journal.Warn("appareil retiré", "evenement", "retrait", "appareil", a.Nom, "raison", "inscription expirée")
+			// Même si l'effacement échoue, l'appareil n'est pas gardé : son
+			// accès est coupé, et l'effacement sera retenté au prochain tour.
+			s.retirer(a, "inscription expirée")
 		case a.Proprietaire != "" && equipe[a.Proprietaire] == "":
 			sortis = append(sortis, a)
 		default:
@@ -183,9 +196,7 @@ func (s *Serveur) Synchroniser() error {
 	massive := len(sortis) >= 3 && 2*len(sortis) > personnels
 	if len(sortis) > 0 && equipeFraiche && !massive {
 		for _, a := range sortis {
-			s.base.Supprimer(a.ID)
-			s.journal.Warn("appareil retiré", "evenement", "retrait", "appareil", a.Nom, "proprietaire", a.Proprietaire,
-				"raison", "propriétaire sorti de l'équipe")
+			s.retirer(a, "propriétaire sorti de l'équipe")
 		}
 	} else if len(sortis) > 0 {
 		s.journal.Error("purge refusée : appareils coupés mais gardés en base, vérifier equipe.txt",
@@ -219,9 +230,9 @@ func (s *Serveur) Synchroniser() error {
 		// Côté serveur, aucun filtre dans le moteur : ce qui s'adresse au
 		// serveur lui-même passe par le pare-feu du noyau.
 		pairs = append(pairs, tunnel.Pair{Publique: pub, Adresses: []netip.Prefix{netip.PrefixFrom(a.Adresse, 32)},
-			Numero: uint32(a.ID), ToutEntrant: true})
+			Numero: uint32(a.ID), ToutEntrant: true}) // #nosec G115 -- borné par base.Enregistrer
 		apps = append(apps, politique.Appareil{Adresse: a.Adresse, Proprietaire: a.Proprietaire, Etiquette: a.Etiquette})
-		numeros[a.Adresse] = uint32(a.ID)
+		numeros[a.Adresse] = uint32(a.ID) // #nosec G115 -- borné par base.Enregistrer
 		noms[a.Nom] = a.Adresse
 		fmt.Fprintf(&sig, "%d %s %s %s %s %s|", a.ID, a.Nom, a.ClePublique, a.Adresse, a.Proprietaire, a.Etiquette)
 	}
@@ -373,7 +384,7 @@ func (s *Serveur) verifierGoogle(ctx context.Context, jeton string) (email, sub 
 		p, err := oidc.NewProvider(ctx, "https://accounts.google.com")
 		if err != nil {
 			s.muGoogle.Unlock()
-			return "", "", fmt.Errorf("Google injoignable : %w", err)
+			return "", "", fmt.Errorf("google injoignable : %w", err)
 		}
 		s.verif = p.Verifier(&oidc.Config{SkipClientIDCheck: true})
 	}

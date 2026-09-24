@@ -27,6 +27,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -41,7 +42,6 @@ import (
 	"time"
 
 	"github.com/Cybertrist/CyberSas/internal/b64"
-
 	"github.com/Cybertrist/CyberSas/internal/client"
 	"github.com/Cybertrist/CyberSas/internal/noise"
 	"github.com/Cybertrist/CyberSas/internal/politique"
@@ -107,13 +107,17 @@ func ecrireEtat(e etat) error {
 		f.Close()
 		return err
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
 	if err := os.Rename(tmp, fichierEtat()); err != nil {
 		return err
 	}
+	// Synchroniser le dossier fixe le renommage sur disque. Le fichier est
+	// déjà complet : un échec ici ne peut que ramener l'ancien état entier.
 	if d, err := os.Open(dossier); err == nil {
-		d.Sync()
-		d.Close()
+		_ = d.Sync()
+		_ = d.Close()
 	}
 	return nil
 }
@@ -166,7 +170,10 @@ func main() {
 		if err := api(e.Serveur).Appel("POST", protocole.CheminDeconnexion, e.Inscription.Jeton, nil, nil); err != nil {
 			fmt.Fprintf(os.Stderr, "sas : le serveur n'a pas confirmé (%v), l'état local est effacé quand même\n", err)
 		}
-		os.Remove(fichierEtat())
+		// La clé privée est dans ce fichier : s'il reste, le dire.
+		if err := os.Remove(fichierEtat()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			meurt("l'état local n'a pas pu être effacé (%v) : supprimer %s à la main", err, fichierEtat())
+		}
 		fmt.Println("désinscrit")
 	case "verrou":
 		cmdVerrou(os.Args[2:])

@@ -45,10 +45,14 @@ passent, sous le détecteur d'accès concurrents de Go.
 ## Relancer les preuves
 
 ```bash
-go test -race ./...                                        # 67 tests, dont ceux de l'audit
-go test -run '^$' -fuzz=FuzzRecevoir -fuzztime=60s ./internal/tunnel
+go test -race ./...                                        # 71 tests, dont ceux de l'audit
+go test -run '^$' -fuzz=FuzzRecevoir -fuzztime=3m ./internal/tunnel
+go test -run '^$' -fuzz=FuzzLireMessage1 -fuzztime=3m ./internal/noise
 bash scripts/sas.sh essai                                  # 18 vérifications dans le labo
 ```
+
+Les outils du deuxième audit se relancent de la même façon, chacun dans son
+conteneur : voir la section « Deuxième audit ».
 
 ## Protocole et cryptographie
 
@@ -428,6 +432,141 @@ indépendant a contrôlé chacun de ses constats.
   refusées : réessayer une inscription juste après un refus devenait
   impossible. Corrigé : seules les preuves d'inscriptions réussies sont
   retenues.
+
+## Deuxième audit : les outils du métier
+
+Le premier audit reposait sur des relecteurs. Le second passe tout le dépôt
+aux outils qu'emploient les équipes de sécurité, chacun lancé dans un
+conteneur, sans rien installer sur le poste. Chaque constat a été lu, puis
+corrigé ou écarté avec sa raison.
+
+### Les outils
+
+- **govulncheck** (Go) : les vulnérabilités connues des dépendances, mais
+  seulement celles que le code appelle vraiment.
+- **staticcheck** : l'analyse statique de référence pour Go.
+- **gosec** : les motifs dangereux en Go (débordements, erreurs ignorées,
+  chemins, commandes).
+- **Semgrep** : 91 règles Go, Dockerfile et Nginx.
+- **Trivy** : les vulnérabilités de l'image Docker, sa configuration, et la
+  recherche de secrets oubliés.
+- **Hadolint** : les bonnes pratiques du Dockerfile.
+- **ShellCheck** : les pièges de Bash dans `scripts/sas.sh`.
+- **Gixy** : les erreurs de configuration de Nginx, sur la configuration
+  réellement chargée (`nginx -T`), pas sur les modèles.
+- **Fuzzing long** : huit cibles, trois minutes chacune, dont quatre
+  nouvelles (ci-dessous).
+
+### Ce qu'ils ont trouvé, et ce qui a été corrigé
+
+- **O1. Une longueur sur deux octets pouvait déborder dans les certificats**
+  (gosec G115). Le message signé d'un certificat écrit chaque texte précédé
+  de sa longueur sur deux octets. Un groupe de plus de 65 535 octets aurait
+  vu sa longueur tronquée, et deux certificats différents auraient pu donner
+  le même message signé. Rien ne permettait d'écrire un tel groupe, mais la
+  signature ne doit pas dépendre de cette chance : tout texte de plus de
+  255 octets est maintenant refusé (`verrou.MaxChamp`). Test :
+  `TestCertificat`.
+- **O2. La même longueur dans les trames relayées** (gosec G115). Sans
+  conséquence, puisque le chiffrement refusait déjà tout message de plus de
+  1 408 octets, mais la borne est maintenant écrite là où la longueur est
+  posée. Test : `TestTrameRelais`.
+- **O3. Le numéro d'appareil était l'identifiant de la base, tronqué à
+  quatre octets** (gosec G115). Au-delà de quatre milliards d'inscriptions,
+  deux appareils auraient partagé un numéro, et le serveur aurait relayé
+  vers le mauvais. Inatteignable en pratique ; refusé quand même à
+  l'inscription (`ErrNumerosEpuises`).
+- **O4. Des erreurs ignorées là où elles comptent** (gosec G104, 38
+  constats triés un par un) :
+  - un appareil dont l'effacement échouait était journalisé comme retiré ;
+    l'échec est maintenant journalisé comme tel, et l'effacement retenté ;
+  - `sas quitter` répondait « désinscrit » même si le serveur n'avait pas
+    pu effacer l'appareil : le serveur renvoie maintenant une erreur, et le
+    client dit si la clé privée n'a pas pu être effacée du disque ;
+  - une erreur de lecture pendant le choix d'une adresse pouvait faire
+    redonner une adresse déjà prise ; l'inscription s'arrête désormais ;
+  - un `SAS_PORT` mal écrit donnait en silence le port par défaut ; sasd
+    refuse maintenant de démarrer ;
+  - la fermeture du fichier d'état, après écriture, est vérifiée.
+- **O5. Les redirections et les en-têtes reprenaient l'en-tête Host du
+  client** (Semgrep, Gixy). Nginx transmettait `$host`, ce que le client a
+  écrit, aux services et à oauth2-proxy. Chaque bloc n'accepte qu'un nom
+  exact, donc la valeur était déjà contrainte, mais elle est maintenant
+  fixée par Nginx (`$server_name`). Le port 80, lui, acceptait
+  `*.domaine` et redirigeait n'importe quel sous-domaine vers lui-même ; il
+  ne connaît plus que les trois noms servis, et coupe les autres sans
+  répondre. Vérifié à la main : `evil.domaine` n'obtient plus rien.
+- **O6. Une mise à jour de Nginx n'était jamais appliquée.** Trouvé en
+  vérifiant O5 : Nginx ne lit ses modèles qu'en démarrant, et
+  `docker compose up` ne le relançait pas quand seuls les fichiers montés
+  changeaient. Une correction de sécurité de la configuration serait donc
+  restée sans effet. `sas.sh demarrer` passe maintenant l'empreinte du
+  dossier `nginx/` au conteneur, qui est recréé dès qu'elle change.
+- **O7. Le serveur par défaut négociait TLS sans réglages explicites**
+  (Gixy). Avant de lire le nom demandé, Nginx négocie avec les réglages du
+  serveur par défaut, qui n'incluait pas `tls.conf`. Nginx 1.30 se limite
+  déjà à TLS 1.2 et 1.3 par défaut ; c'est maintenant écrit pour tous.
+- **O8. Paquets Alpine non figés** (Hadolint DL3018). Les versions sont
+  maintenant fixées, en laissant passer les révisions de sécurité.
+- **O9. Le script** (ShellCheck) : une variable globale portait le même nom
+  qu'un tableau local, et une construction `a && b || c` pouvait lancer `c`
+  à tort. Corrigés ; ShellCheck ne relève plus rien.
+- **O10. Style** (staticcheck ST1005) : un message d'erreur commençait par
+  une majuscule.
+
+### Écartés, avec leur raison
+
+- **« Le conteneur tourne en root »** (Semgrep, Trivy DS-0002). Vérifié :
+  sous un autre utilisateur, les capacités données par compose ne sont pas
+  effectives, et `no-new-privileges` interdit de les poser sur le fichier.
+  sasd doit créer une interface et écrire des règles nftables. Ce root n'a
+  que les capacités listées dans `compose.yaml`, sur un système de fichiers
+  en lecture seule. Expliqué dans le Dockerfile.
+- **« Pas de HEALTHCHECK »** (Trivy DS-0026). La même image sert au client,
+  qui n'a pas d'API. La vérification de sasd est dans `compose.yaml`.
+- **Chemins et commandes « variables »** (gosec G204, G304, G703). Ce sont
+  les chemins de la configuration et le chemin absolu de `ip`, jamais une
+  donnée venue du réseau.
+- **Droits 0700 sur un dossier** (gosec G302). Un dossier a besoin du droit
+  d'exécution pour être traversé ; 0700 reste réservé à son propriétaire.
+- **Conversions d'heures en entiers non signés** (gosec G115). Horodatages
+  de 2026, loin de toute limite.
+- **Erreurs ignorées restantes** (gosec G104) : envois UDP et DNS au mieux,
+  fermetures sur un chemin déjà en erreur, affichage à l'écran, lecture du
+  corps d'une erreur HTTP. Aucune ne change une décision de sécurité.
+- **`worker_rlimit_nofile`** (Gixy). Réglage de charge du `nginx.conf` de
+  l'image officielle, sans effet sur la sécurité.
+- **govulncheck** relève GO-2026-5932 dans `golang.org/x/crypto/openpgp`,
+  paquet que CyberSas n'importe pas. Trivy ne trouve aucune vulnérabilité
+  dans l'image, ni aucun secret dans le dépôt.
+
+### Le fuzzing, poussé plus loin
+
+Quatre nouvelles cibles s'ajoutent aux quatre du moteur :
+
+- **`FuzzLireMessage1` et `FuzzLireMessage2`** : du fuzzing *différentiel*.
+  Chaque suite d'octets est lue à la fois par notre poignée de main et par
+  flynn/noise. Les deux doivent accepter et refuser exactement les mêmes
+  messages, et lire la même chose. Et un message accepté doit être celui
+  que l'appareil a vraiment écrit : sans sa clé, aucun ne passe.
+- **`FuzzDecoder`** : le décodeur base64 n'accepte qu'une écriture par
+  valeur, et accepte toujours celle-là.
+- **`FuzzPolitique`** : une politique quelconque, même absurde, ne fait
+  jamais tomber le serveur, et n'ouvre jamais de flux vers une adresse qui
+  n'est pas un appareil.
+
+Résultat, trois minutes par cible, **148 millions d'entrées au total, sans
+une panique ni un désaccord** :
+
+- lecture d'un paquet IPv4 : 20,8 millions ;
+- lecture d'une trame relayée : 18,9 millions ;
+- fenêtre anti-rejeu : 20,6 millions ;
+- point d'entrée réseau du moteur : 20,7 millions ;
+- message 1 de la poignée de main, contre flynn/noise : 6,2 millions ;
+- message 2, contre flynn/noise : 1,0 million (chaque essai refait une
+  poignée de main complète) ;
+- décodeur base64 : 38,6 millions ;
+- politique : 21,2 millions.
 
 ## Ce qui reste
 

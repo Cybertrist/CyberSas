@@ -62,10 +62,18 @@ type Certificat struct {
 	Expire       time.Time
 }
 
+// ErrChamp : un texte du certificat dépasse MaxChamp octets.
+var ErrChamp = errors.New("verrou : étiquette, propriétaire ou groupe trop long")
+
+// MaxChamp : la plus grande étiquette, adresse ou groupe signable. Une
+// adresse e-mail tient en 254 octets.
+const MaxChamp = 255
+
 // champ : longueur sur deux octets, puis la valeur. Sans longueur, deux
-// certificats différents pourraient donner le même message.
+// certificats différents pourraient donner le même message. Message a
+// vérifié avant que la longueur tient dans ces deux octets.
 func champ(b []byte, s string) []byte {
-	b = binary.BigEndian.AppendUint16(b, uint16(len(s)))
+	b = binary.BigEndian.AppendUint16(b, uint16(len(s))) // #nosec G115 -- borné par MaxChamp
 	return append(b, s...)
 }
 
@@ -73,6 +81,9 @@ func champ(b []byte, s string) []byte {
 func (c Certificat) Message() ([]byte, error) {
 	if !c.Adresse.Is4() {
 		return nil, ErrAdresse
+	}
+	if len(c.Etiquette) > MaxChamp || len(c.Proprietaire) > MaxChamp || len(c.Groupe) > MaxChamp {
+		return nil, ErrChamp
 	}
 	a := c.Adresse.As4()
 	m := append([]byte(contexteCertificat), c.Cle[:]...)

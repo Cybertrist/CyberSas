@@ -516,7 +516,11 @@ func TestFenetreAntiRejeu(t *testing.T) {
 
 func TestTrameRelais(t *testing.T) {
 	msg := []byte{typeDonnees, 0, 0, 0, 1, 2, 3}
-	tr := append(trameRelais(7, msg), 0, 0, 0, 0) // remplissage de la couche transport
+	tr, ok := trameRelais(7, msg)
+	if !ok {
+		t.Fatal("trame refusée")
+	}
+	tr = append(tr, 0, 0, 0, 0) // remplissage de la couche transport
 	n, m, ok := lireTrame(tr)
 	if !ok || n != 7 || !bytes.Equal(m, msg) {
 		t.Fatalf("trame mal relue : %d %v %v", n, m, ok)
@@ -524,5 +528,10 @@ func TestTrameRelais(t *testing.T) {
 	tr[3] = 200 // longueur plus grande que la trame
 	if _, _, ok := lireTrame(tr); ok {
 		t.Fatal("une trame à la longueur mensongère a été acceptée")
+	}
+	// Plus long qu'un clair : refusé avant que sa longueur ne déborde des
+	// deux octets de l'en-tête.
+	if _, ok := trameRelais(7, make([]byte, 1<<16+10)); ok {
+		t.Fatal("un message de 64 Kio a été mis en trame")
 	}
 }

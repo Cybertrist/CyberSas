@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -25,6 +26,7 @@ var (
 	ErrNomPris           = errors.New("ce nom de machine est déjà pris")
 	ErrAutreCompte       = errors.New("cette adresse est liée à un autre compte Google")
 	ErrReseauPlein       = errors.New("plus aucune adresse libre dans le réseau")
+	ErrNumerosEpuises    = errors.New("plus aucun numéro d'appareil libre")
 )
 
 // NomsReserves : jamais donnés à un appareil. « serveur » désigne le
@@ -274,7 +276,15 @@ func (b *Base) Enregistrer(ins Inscription, reseau netip.Prefix, serveur netip.A
 		if err != nil {
 			return a, err
 		}
-		a.ID, _ = r.LastInsertId()
+		if a.ID, err = r.LastInsertId(); err != nil {
+			return a, err
+		}
+		// L'identifiant sert de numéro d'appareil dans le tunnel, sur quatre
+		// octets : au-delà, deux appareils partageraient le même numéro et
+		// le serveur relaierait vers le mauvais.
+		if a.ID <= 0 || a.ID > math.MaxUint32 {
+			return a, ErrNumerosEpuises
+		}
 		a.Cree = now
 	default:
 		return a, err
@@ -331,14 +341,24 @@ func adresseLibre(tx *sql.Tx, reseau netip.Prefix, serveur netip.Addr) (netip.Ad
 	if err != nil {
 		return netip.Addr{}, err
 	}
+	// Une adresse mal lue serait redonnée à un second appareil : toute
+	// erreur de lecture arrête l'inscription.
 	for rows.Next() {
 		var s string
-		rows.Scan(&s)
+		if err := rows.Scan(&s); err != nil {
+			_ = rows.Close() // l'erreur de Scan est celle qui compte
+			return netip.Addr{}, err
+		}
 		prises[s] = true
 	}
-	rows.Close()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return netip.Addr{}, err
+	}
 	var derniere string
-	tx.QueryRow(`SELECT valeur FROM reglages WHERE cle = 'derniere_adresse'`).Scan(&derniere)
+	err = tx.QueryRow(`SELECT valeur FROM reglages WHERE cle = 'derniere_adresse'`).Scan(&derniere)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return netip.Addr{}, err
+	}
 	depart, err := netip.ParseAddr(derniere)
 	if err != nil || !reseau.Contains(depart) {
 		depart = reseau.Masked().Addr()

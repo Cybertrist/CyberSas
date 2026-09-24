@@ -1,7 +1,9 @@
 package verrou
 
 import (
+	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,6 +51,17 @@ func TestCertificat(t *testing.T) {
 	mb, _ := b.Message()
 	if string(ma) == string(mb) {
 		t.Fatal("deux certificats différents donnent le même message")
+	}
+	// Au-delà de 65 535 octets, la longueur déborderait et deux champs se
+	// confondraient : tout texte plus long que MaxChamp est refusé.
+	long := c
+	long.Groupe = strings.Repeat("a", 1<<16+1)
+	if _, err := long.Message(); !errors.Is(err, ErrChamp) {
+		t.Fatalf("groupe de 64 Kio signable : %v", err)
+	}
+	long.Groupe = strings.Repeat("a", MaxChamp)
+	if _, err := long.Message(); err != nil {
+		t.Fatalf("groupe de %d octets refusé : %v", MaxChamp, err)
 	}
 	// Expiré : refusé.
 	if c.Verifier(pub, sig, c.Expire.Add(time.Second)) {

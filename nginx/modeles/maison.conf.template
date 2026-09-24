@@ -15,7 +15,7 @@ server {
     include /etc/nginx/extraits/google-point.conf;
 
     location @connexion {
-        return 302 https://auth.${DOMAINE}/oauth2/start?rd=$scheme://$host$request_uri;
+        return 302 https://auth.${DOMAINE}/oauth2/start?rd=https://$server_name$request_uri;
     }
 
     location / {

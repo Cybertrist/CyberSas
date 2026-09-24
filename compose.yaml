@@ -96,9 +96,13 @@ services:
     tmpfs: [/etc/nginx/conf.d, /var/cache/nginx, /var/run, /tmp]
     environment:
       DOMAINE: ${DOMAINE}
-      # Seule DOMAINE est remplacée dans les modèles : $host et les autres
-      # variables de Nginx restent intactes.
+      # Seule DOMAINE est remplacée dans les modèles : $server_name et les
+      # autres variables de Nginx restent intactes.
       NGINX_ENVSUBST_FILTER: "^DOMAINE$$"
+      # Les modèles ne sont lus qu'au démarrage de Nginx. sas.sh met ici
+      # l'empreinte de nginx/ : quand un fichier change, elle change, et
+      # compose recrée le conteneur au lieu de garder l'ancienne config.
+      SAS_EMPREINTE_NGINX: ${SAS_EMPREINTE_NGINX:-}
     volumes:
       - ./nginx/modeles:/etc/nginx/templates:ro
       - ./nginx/extraits:/etc/nginx/extraits:ro

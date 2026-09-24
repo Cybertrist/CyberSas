@@ -28,7 +28,8 @@ func FuzzLireIPv4(f *testing.F) {
 }
 
 func FuzzLireTrame(f *testing.F) {
-	f.Add(trameRelais(3, []byte{typeDonnees, 0, 0, 0, 1}))
+	graine, _ := trameRelais(3, []byte{typeDonnees, 0, 0, 0, 1})
+	f.Add(graine)
 	f.Add([]byte{0, 0, 0xff, 0xff, 1, 0, 0, 0})
 	f.Fuzz(func(t *testing.T, b []byte) {
 		_, msg, ok := lireTrame(b)

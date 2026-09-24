@@ -44,7 +44,7 @@ func (s *session) aRenouveler() bool {
 func (s *session) chiffrer(clair []byte) []byte {
 	n := s.compteur.Add(1) - 1
 	remplissage := (16 - len(clair)%16) % 16
-	if len(clair)+remplissage > MTU {
+	if len(clair)+remplissage > tailleMaxClair {
 		remplissage = 0
 	}
 	msg := make([]byte, enteteDonnees, enteteDonnees+len(clair)+remplissage+tailleTag)

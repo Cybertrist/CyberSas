@@ -8,28 +8,28 @@ import (
 	"strings"
 )
 
-// Nft écrit le jeu de règles complet. Il remplace l'ancien d'un bloc :
+// Nft écrit le jeu de règles du serveur. Il remplace l'ancien d'un bloc :
 // nft l'applique de façon atomique, il n'y a jamais d'instant où le
 // pare-feu est à moitié chargé.
 //
 // Trois chemins passent par l'interface du VPN :
 //
-//	transit : d'un appareil à un autre, à travers le serveur
+//	transit : d'un appareil à un autre, à travers le noyau du serveur.
+//	          Toujours fermé. Entre appareils, tout passe chiffré de bout en
+//	          bout par le relais du moteur ; un paquet en clair qui tenterait
+//	          de traverser serait un contournement.
 //	sortie  : du serveur vers un appareil (Nginx qui publie un service)
 //	entree  : d'un appareil vers le serveur (le DNS du VPN)
 //
-// Chacun commence fermé, laisse passer les réponses aux connexions déjà
-// ouvertes, puis n'autorise que ce que la politique dit.
+// Les deux derniers commencent fermés, laissent passer les réponses aux
+// connexions déjà ouvertes, puis n'autorisent que ce que la politique dit.
 func Nft(flux []Flux, iface string, serveur netip.Addr) string {
-	var transit, sortie, entree []string
+	var sortie, entree []string
 	for _, f := range flux {
 		src, dst := sansServeur(f.Sources, serveur), sansServeur(f.Dest, serveur)
 		depuisServeur := slices.Contains(f.Sources, serveur)
 		versServeur := slices.Contains(f.Dest, serveur)
 		for _, p := range f.Ports {
-			if len(src) > 0 && len(dst) > 0 {
-				transit = append(transit, regle(src, dst, p))
-			}
 			if depuisServeur && len(dst) > 0 {
 				sortie = append(sortie, regle([]netip.Addr{serveur}, dst, p))
 			}
@@ -41,8 +41,9 @@ func Nft(flux []Flux, iface string, serveur netip.Addr) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "table inet cybersas\ndelete table inet cybersas\n")
 	fmt.Fprintf(&b, "table inet cybersas {\n")
-	chaine(&b, "transit", "forward", iface, "iifname", "depuis_vpn",
-		append([]string{fmt.Sprintf(`oifname != "%s" counter drop comment "le serveur n'est pas une sortie vers Internet"`, iface)}, transit...))
+	fmt.Fprintf(&b, "\tchain transit {\n\t\ttype filter hook forward priority filter; policy accept;\n"+
+		"\t\tiifname \"%s\" counter drop comment \"aucun paquet ne traverse le serveur en clair\"\n"+
+		"\t\toifname \"%s\" counter drop comment \"ni n'entre dans le VPN depuis ailleurs\"\n\t}\n", iface, iface)
 	chaine(&b, "sortie", "output", iface, "oifname", "depuis_serveur", sortie)
 	chaine(&b, "entree", "input", iface, "iifname", "vers_serveur",
 		append([]string{

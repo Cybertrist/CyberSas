@@ -25,22 +25,46 @@ type Tun interface {
 	Close() error
 }
 
-// Pair : un appareil avec qui l'on échange.
+// Pair : un bout de tunnel avec qui l'on échange.
 type Pair struct {
 	Publique [32]byte
-	// Les adresses que ce pair a le droit d'utiliser comme source, et
-	// celles vers lesquelles on lui envoie les paquets.
+	// Adresses que ce pair a le droit d'utiliser comme source, et vers
+	// lesquelles on lui envoie les paquets.
 	Adresses []netip.Prefix
-	// Point, s'il est donné, fait de nous l'initiateur : c'est le client
-	// qui connaît l'adresse du serveur. Sinon, on l'apprend du pair.
+	// Point, s'il est donné, se joint en direct en UDP : c'est le serveur,
+	// vu d'un client. On initie les poignées de main vers lui.
 	Point netip.AddrPort
+	// Numero : numéro d'appareil attribué par le serveur. Sert d'adresse
+	// dans les trames de relais.
+	Numero uint32
+	// ParRelais : ce pair est un autre appareil, joint à travers le
+	// serveur. On initie aussi vers lui.
+	ParRelais bool
 	// Maintien : un paquet vide à cet intervalle garde ouverte la
 	// traduction d'adresse de la box. Zéro pour ne rien envoyer.
 	Maintien time.Duration
+	// Ce que ce pair peut ouvrir chez nous. ToutEntrant supprime le filtre :
+	// sur le serveur, c'est le pare-feu du noyau qui filtre.
+	ToutEntrant bool
+	Entrant     []Regle
+}
+
+type Config struct {
+	Prive   *ecdh.PrivateKey
+	Tun     Tun
+	Conn    *net.UDPConn
+	Journal *slog.Logger
+	// Relais, côté serveur : ce moteur relaie les trames d'un appareil à un
+	// autre si cette fonction l'autorise. Nil chez un client.
+	Relais func(de, vers uint32) bool
+	// SeuilCharge : poignées de main par seconde au-delà desquelles le
+	// moteur exige un cookie. Zéro vaut 200.
+	SeuilCharge int
 }
 
 type EtatPair struct {
 	Publique        [32]byte
+	Numero          uint32
 	Point           netip.AddrPort
 	DernierePoignee time.Time
 	Recus, Envoyes  uint64
@@ -48,25 +72,33 @@ type EtatPair struct {
 
 type pair struct {
 	pub      [32]byte
+	cles     clesMac // pour signer ce qu'on lui envoie
 	adresses atomic.Pointer[[]netip.Prefix]
+	entrant  atomic.Pointer[regles]
+	numero   atomic.Uint32
 
 	mu                             sync.Mutex
 	point                          netip.AddrPort
-	initie                         bool
+	direct, relais                 atomic.Bool // on initie vers lui, en direct ou par relais
 	maintien                       time.Duration
 	courante, precedente, suivante *session
 	poignee                        *noise.Initiateur
 	indicePoignee                  uint32
 	derniereTentative              time.Time
 	debutTentatives                time.Time
+	dernierMac1                    [tailleMac]byte
+	cookie                         [tailleMac]byte
+	cookieRecu                     time.Time
 	dernierHorodatage              []byte
 	dernierEnvoi, dernierePoignee  time.Time
+	derniereReception              time.Time // dernier paquet authentifié
+	derniereDonnee                 time.Time // dernier paquet non vide
+	sansReponseDepuis              time.Time
 	recus, envoyes                 uint64
 	attente                        [][]byte
-	// derniereReception : dernier paquet authentifié reçu de ce pair.
-	// sansReponseDepuis : premier paquet de données envoyé depuis.
-	derniereReception, sansReponseDepuis time.Time
 }
+
+func (p *pair) actif() bool { return p.direct.Load() || p.relais.Load() }
 
 func (p *pair) autorise(a netip.Addr) bool {
 	for _, pr := range *p.adresses.Load() {
@@ -77,29 +109,61 @@ func (p *pair) autorise(a netip.Addr) bool {
 	return false
 }
 
-// Moteur : un bout du tunnel. Le serveur en a un avec un pair par
-// appareil, un client en a un avec un seul pair, le serveur.
+// envoi : un message prêt à partir. Tout est préparé sous verrou, puis
+// expédié une fois les verrous rendus : envoyer par relais demande le
+// verrou d'un autre pair, et l'on ne tient jamais deux verrous de pair.
+type envoi struct {
+	msg    []byte
+	point  netip.AddrPort // en direct
+	relais uint32         // ou par le serveur, vers ce numéro
+}
+
+// origine : d'où vient un message reçu.
+type origine struct {
+	point  netip.AddrPort // en direct
+	relais bool           // ou relayé par le serveur,
+	numero uint32         // depuis cet appareil
+}
+
+// Moteur : un bout du tunnel. Le serveur en a un avec un pair par appareil ;
+// un client en a un avec le serveur, plus un pair par appareil qu'il a le
+// droit de joindre ou qui a le droit de le joindre.
 type Moteur struct {
 	prive   atomic.Pointer[ecdh.PrivateKey]
+	nosCles atomic.Pointer[clesMac] // pour vérifier ce qu'on reçoit
 	tun     Tun
 	conn    *net.UDPConn
 	journal *slog.Logger
+	relais  func(de, vers uint32) bool
 
-	// Ordre des verrous : toujours pair.mu avant Moteur.mu, jamais l'inverse.
-	mu      sync.RWMutex
-	pairs   map[[32]byte]*pair
-	indices map[uint32]*pair
+	// Ordre des verrous : pair.mu, puis Moteur.mu. Jamais deux pair.mu.
+	mu        sync.RWMutex
+	pairs     map[[32]byte]*pair
+	indices   map[uint32]*pair
+	parNumero map[uint32]*pair
+	serveur   *pair // le pair direct, chez un client
 
+	cookies        fabrique
+	charge         charge
+	suivi          suivi
 	sansReponseMax time.Duration
+	// sondeRelais, pour les tests : reçoit chaque message relayé, tel que
+	// le serveur l'a en main.
+	sondeRelais atomic.Pointer[func([]byte)]
 }
 
-func Nouveau(prive *ecdh.PrivateKey, tun Tun, conn *net.UDPConn, journal *slog.Logger) *Moteur {
-	if journal == nil {
-		journal = slog.New(slog.DiscardHandler)
+func Nouveau(c Config) *Moteur {
+	if c.Journal == nil {
+		c.Journal = slog.New(slog.DiscardHandler)
 	}
-	m := &Moteur{tun: tun, conn: conn, journal: journal,
-		pairs: map[[32]byte]*pair{}, indices: map[uint32]*pair{}, sansReponseMax: sansReponseDefaut}
-	m.prive.Store(prive)
+	if c.SeuilCharge == 0 {
+		c.SeuilCharge = 200
+	}
+	m := &Moteur{tun: c.Tun, conn: c.Conn, journal: c.Journal, relais: c.Relais,
+		pairs: map[[32]byte]*pair{}, indices: map[uint32]*pair{}, parNumero: map[uint32]*pair{},
+		sansReponseMax: sansReponseDefaut}
+	m.charge.seuil = c.SeuilCharge
+	m.DefinirCle(c.Prive)
 	return m
 }
 
@@ -107,10 +171,14 @@ func Nouveau(prive *ecdh.PrivateKey, tun Tun, conn *net.UDPConn, journal *slog.L
 // inscription. Toutes les sessions établies avec l'ancienne tombent : il
 // faut redonner les pairs ensuite.
 func (m *Moteur) DefinirCle(prive *ecdh.PrivateKey) {
+	cles := deriverClesMac(prive.PublicKey().Bytes())
 	m.mu.Lock()
 	m.prive.Store(prive)
+	m.nosCles.Store(&cles)
 	m.pairs = map[[32]byte]*pair{}
 	m.indices = map[uint32]*pair{}
+	m.parNumero = map[uint32]*pair{}
+	m.serveur = nil
 	m.mu.Unlock()
 }
 
@@ -124,14 +192,24 @@ func (m *Moteur) DefinirPairs(liste []Pair) {
 	var majs []maj
 	m.mu.Lock()
 	vus := map[[32]byte]bool{}
+	m.parNumero = map[uint32]*pair{}
+	m.serveur = nil
 	for _, c := range liste {
 		p := m.pairs[c.Publique]
 		if p == nil {
-			p = &pair{pub: c.Publique}
+			p = &pair{pub: c.Publique, cles: deriverClesMac(c.Publique[:])}
 			m.pairs[c.Publique] = p
 		}
 		a := slices.Clone(c.Adresses)
 		p.adresses.Store(&a)
+		p.entrant.Store(&regles{toutes: c.ToutEntrant, liste: slices.Clone(c.Entrant)})
+		p.numero.Store(c.Numero)
+		if c.Numero != 0 {
+			m.parNumero[c.Numero] = p
+		}
+		if c.Point.IsValid() {
+			m.serveur = p
+		}
 		vus[c.Publique] = true
 		majs = append(majs, maj{p, c})
 	}
@@ -149,27 +227,33 @@ func (m *Moteur) DefinirPairs(liste []Pair) {
 	for _, x := range majs {
 		x.p.mu.Lock()
 		if x.c.Point.IsValid() {
-			x.p.point, x.p.initie = x.c.Point, true
+			x.p.point = x.c.Point
 		}
+		x.p.direct.Store(x.c.Point.IsValid())
+		x.p.relais.Store(x.c.ParRelais)
 		x.p.maintien = x.c.Maintien
 		x.p.mu.Unlock()
 	}
 }
 
 func (m *Moteur) Etat() []EtatPair {
-	m.mu.RLock()
-	liste := make([]*pair, 0, len(m.pairs))
-	for _, p := range m.pairs {
-		liste = append(liste, p)
-	}
-	m.mu.RUnlock()
 	var r []EtatPair
-	for _, p := range liste {
+	for _, p := range m.listePairs() {
 		p.mu.Lock()
-		r = append(r, EtatPair{p.pub, p.point, p.dernierePoignee, p.recus, p.envoyes})
+		r = append(r, EtatPair{p.pub, p.numero.Load(), p.point, p.dernierePoignee, p.recus, p.envoyes})
 		p.mu.Unlock()
 	}
 	return r
+}
+
+func (m *Moteur) listePairs() []*pair {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	l := make([]*pair, 0, len(m.pairs))
+	for _, p := range m.pairs {
+		l = append(l, p)
+	}
+	return l
 }
 
 // Lancer fait tourner le moteur jusqu'à l'annulation du contexte.
@@ -193,9 +277,145 @@ func (m *Moteur) Lancer(ctx context.Context) error {
 	}
 }
 
-func (m *Moteur) ecrire(msg []byte, point netip.AddrPort) {
-	if point.IsValid() {
-		m.conn.WriteToUDPAddrPort(msg, point)
+// --- expédition ----------------------------------------------------------------
+
+func (m *Moteur) expedier(envois []envoi) {
+	for _, e := range envois {
+		switch {
+		case e.relais != 0:
+			m.relayer(e.relais, e.msg)
+		case e.point.IsValid():
+			m.conn.WriteToUDPAddrPort(e.msg, e.point)
+		}
+	}
+}
+
+// trameRelais : zéro, réservé, longueur du message (2 octets, grand-
+// boutiste), numéro d'appareil (4 octets), puis le message. La longueur
+// permet d'écarter le remplissage ajouté par la couche transport.
+func trameRelais(numero uint32, msg []byte) []byte {
+	t := make([]byte, enteteRelais, enteteRelais+len(msg))
+	binary.BigEndian.PutUint16(t[2:4], uint16(len(msg)))
+	binary.LittleEndian.PutUint32(t[4:8], numero)
+	return append(t, msg...)
+}
+
+func lireTrame(t []byte) (numero uint32, msg []byte, ok bool) {
+	if len(t) < enteteRelais || t[0] != 0 {
+		return 0, nil, false
+	}
+	n := int(binary.BigEndian.Uint16(t[2:4]))
+	if n > len(t)-enteteRelais {
+		return 0, nil, false
+	}
+	return binary.LittleEndian.Uint32(t[4:8]), t[enteteRelais : enteteRelais+n], true
+}
+
+// relayer, côté client : remet au serveur un message destiné à un autre
+// appareil. Le message est déjà chiffré de bout en bout ; la trame, elle,
+// est chiffrée pour le serveur.
+func (m *Moteur) relayer(numero uint32, msg []byte) {
+	m.mu.RLock()
+	s := m.serveur
+	m.mu.RUnlock()
+	if s == nil {
+		return
+	}
+	m.expedier(m.envoyerClair(s, trameRelais(numero, msg)))
+}
+
+// envoyerClair chiffre un clair pour ce pair, avec la session courante.
+// Sans session, le clair attend et une poignée de main part.
+func (m *Moteur) envoyerClair(p *pair, clair []byte) []envoi {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var envois []envoi
+	s := p.courante
+	if !s.utilisable() {
+		// Le serveur n'initie jamais : sans session, le paquet est perdu,
+		// et l'appareil en rouvrira une de lui-même.
+		if p.actif() && len(p.attente) < maxEnAttente {
+			p.attente = append(p.attente, clair)
+		}
+		return m.lancerPoignee(p)
+	}
+	if s.aRenouveler() {
+		envois = m.lancerPoignee(p)
+	}
+	p.envoyes++
+	p.dernierEnvoi = time.Now()
+	if p.actif() && len(clair) > 0 && p.sansReponseDepuis.IsZero() {
+		p.sansReponseDepuis = p.dernierEnvoi
+	}
+	return append(envois, p.versLui(s.chiffrer(clair)))
+}
+
+// versLui : un envoi vers ce pair, en direct ou par relais. Appelée avec
+// p.mu tenu.
+func (p *pair) versLui(msg []byte) envoi {
+	if p.relais.Load() {
+		return envoi{msg: msg, relais: p.numero.Load()}
+	}
+	return envoi{msg: msg, point: p.point}
+}
+
+// lancerPoignee prépare une initiation, au plus toutes les cinq secondes.
+// Appelée avec p.mu tenu.
+func (m *Moteur) lancerPoignee(p *pair) []envoi {
+	if !p.actif() || (p.direct.Load() && !p.point.IsValid()) {
+		return nil
+	}
+	now := time.Now()
+	if p.poignee != nil && now.Sub(p.derniereTentative) < relancerApres {
+		return nil
+	}
+	if p.debutTentatives.IsZero() {
+		p.debutTentatives = now
+	}
+	ini := noise.NouvelInitiateur(m.prive.Load(), p.pub[:], Prologue)
+	corps, err := ini.Message1(horodatage(now))
+	if err != nil {
+		m.journal.Warn("initiation impossible", "erreur", err)
+		return nil
+	}
+	idx := indiceAleatoire()
+	m.mu.Lock()
+	if p.indicePoignee != 0 {
+		delete(m.indices, p.indicePoignee)
+	}
+	m.indices[idx] = p
+	m.mu.Unlock()
+	p.poignee, p.indicePoignee, p.derniereTentative = ini, idx, now
+
+	msg := binary.LittleEndian.AppendUint32(entete(typeInitiation), idx)
+	msg = append(append(msg, corps...), make([]byte, 2*tailleMac)...)
+	var cookie *[tailleMac]byte
+	if p.direct.Load() && !p.cookieRecu.IsZero() && now.Sub(p.cookieRecu) < dureeCookie {
+		cookie = &p.cookie
+	}
+	p.dernierMac1 = signerMacs(msg, p.cles, cookie)
+	return []envoi{p.versLui(msg)}
+}
+
+// --- sortie : de l'interface vers le réseau ----------------------------------
+
+func (m *Moteur) boucleTun() error {
+	buf := make([]byte, MTU+128)
+	for {
+		n, err := m.tun.Read(buf)
+		if err != nil {
+			return err
+		}
+		ip, ok := lireIPv4(buf[:n])
+		if !ok {
+			continue
+		}
+		p := m.router(netip.AddrFrom4(ip.dest))
+		if p == nil {
+			continue
+		}
+		m.suivi.noter(ip)
+		m.expedier(m.envoyerClair(p, append([]byte(nil), buf[:ip.longueur]...)))
 	}
 }
 
@@ -216,81 +436,6 @@ func (m *Moteur) router(dest netip.Addr) *pair {
 	return meilleur
 }
 
-// --- sortie : de l'interface vers le réseau ----------------------------------
-
-func (m *Moteur) boucleTun() error {
-	buf := make([]byte, MTU+128)
-	for {
-		n, err := m.tun.Read(buf)
-		if err != nil {
-			return err
-		}
-		ip, ok := lireIPv4(buf[:n])
-		if !ok {
-			continue
-		}
-		if p := m.router(netip.AddrFrom4(ip.dest)); p != nil {
-			m.envoyerPaquet(p, append([]byte(nil), buf[:ip.longueur]...))
-		}
-	}
-}
-
-func (m *Moteur) envoyerPaquet(p *pair, paquet []byte) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	s := p.courante
-	if !s.utilisable() {
-		// Le serveur n'initie jamais : sans session, le paquet est perdu,
-		// et le client en rouvrira une de lui-même.
-		if p.initie && len(p.attente) < maxEnAttente {
-			p.attente = append(p.attente, paquet)
-		}
-		m.lancerPoignee(p)
-		return
-	}
-	if s.aRenouveler() {
-		m.lancerPoignee(p)
-	}
-	p.envoyes++
-	p.dernierEnvoi = time.Now()
-	if p.initie && p.sansReponseDepuis.IsZero() {
-		p.sansReponseDepuis = p.dernierEnvoi
-	}
-	m.ecrire(s.chiffrer(paquet), p.point)
-}
-
-// lancerPoignee envoie une initiation, au plus toutes les cinq secondes.
-// Appelée avec p.mu tenu.
-func (m *Moteur) lancerPoignee(p *pair) {
-	if !p.initie || !p.point.IsValid() {
-		return
-	}
-	now := time.Now()
-	if p.poignee != nil && now.Sub(p.derniereTentative) < relancerApres {
-		return
-	}
-	if p.debutTentatives.IsZero() {
-		p.debutTentatives = now
-	}
-	ini := noise.NouvelInitiateur(m.prive.Load(), p.pub[:], Prologue)
-	corps, err := ini.Message1(horodatage(now))
-	if err != nil {
-		m.journal.Warn("initiation impossible", "erreur", err)
-		return
-	}
-	idx := indiceAleatoire()
-	m.mu.Lock()
-	if p.indicePoignee != 0 {
-		delete(m.indices, p.indicePoignee)
-	}
-	m.indices[idx] = p
-	m.mu.Unlock()
-	p.poignee, p.indicePoignee, p.derniereTentative = ini, idx, now
-
-	msg := binary.LittleEndian.AppendUint32(entete(typeInitiation), idx)
-	m.ecrire(append(msg, corps...), p.point)
-}
-
 // --- entrée : du réseau vers l'interface ------------------------------------
 
 func (m *Moteur) boucleUDP() error {
@@ -300,31 +445,69 @@ func (m *Moteur) boucleUDP() error {
 		if err != nil {
 			return err
 		}
-		if n < 4 {
-			continue
-		}
 		src = netip.AddrPortFrom(src.Addr().Unmap(), src.Port())
-		msg := buf[:n]
-		switch msg[0] {
-		case typeInitiation:
-			m.recevoirInitiation(msg, src)
-		case typeReponse:
-			m.recevoirReponse(msg)
-		case typeDonnees:
-			m.recevoirDonnees(msg, src)
-		}
+		m.recevoir(buf[:n], origine{point: src})
 	}
 }
 
-func (m *Moteur) recevoirInitiation(msg []byte, src netip.AddrPort) {
-	if len(msg) != tailleInitiation {
-		return
+func (m *Moteur) recevoir(msg []byte, o origine) {
+	m.expedier(m.traiter(msg, o))
+}
+
+// traiter : ce qu'un message reçu change, et ce qu'il faut envoyer en
+// retour. Séparé de l'expédition pour que le fuzzing puisse l'appeler seul.
+func (m *Moteur) traiter(msg []byte, o origine) []envoi {
+	if len(msg) < 4 {
+		return nil
+	}
+	switch msg[0] {
+	case typeInitiation:
+		return m.recevoirInitiation(msg, o)
+	case typeReponse:
+		return m.recevoirReponse(msg, o)
+	case typeCookie:
+		m.recevoirCookie(msg)
+	case typeDonnees:
+		return m.recevoirDonnees(msg, o)
+	}
+	return nil
+}
+
+// verifierVenue : un message relayé doit venir d'un appareil joint par
+// relais, sous le numéro que le serveur annonce ; un message direct, d'un
+// pair qui n'est pas joint par relais. Un serveur ne peut donc pas faire
+// passer un appareil pour un autre, ni un appareil contourner le serveur.
+func verifierVenue(p *pair, o origine) bool {
+	if o.relais {
+		return p.relais.Load() && p.numero.Load() == o.numero
+	}
+	return !p.relais.Load()
+}
+
+func (m *Moteur) recevoirInitiation(msg []byte, o origine) []envoi {
+	if len(msg) != tailleInitiation || !mac1Valide(msg, *m.nosCles.Load()) {
+		return nil
 	}
 	envoyeur := binary.LittleEndian.Uint32(msg[4:8])
+	// Sous charge, seul un expéditeur qui a prouvé posséder son adresse
+	// passe, et à un rythme limité. Les messages relayés ont déjà passé ce
+	// contrôle chez le serveur.
+	if !o.relais && m.charge.sousCharge() {
+		n := len(msg)
+		var mac1 [tailleMac]byte
+		copy(mac1[:], msg[n-2*tailleMac:n-tailleMac])
+		if !mac2Valide(msg, m.cookies.cookie(o.point)) {
+			return []envoi{{msg: m.cookies.reponseCookie(envoyeur, mac1, o.point, *m.nosCles.Load()), point: o.point}}
+		}
+		if !m.charge.autoriser(o.point.Addr()) {
+			return nil
+		}
+	}
+
 	r := noise.NouveauRepondeur(m.prive.Load(), Prologue)
-	publique, charge, err := r.LireMessage1(msg[8:])
+	publique, charge, err := r.LireMessage1(msg[8 : len(msg)-2*tailleMac])
 	if err != nil || len(charge) != tailleHorodatage {
-		return
+		return nil
 	}
 	var cle [32]byte
 	copy(cle[:], publique)
@@ -332,8 +515,12 @@ func (m *Moteur) recevoirInitiation(msg []byte, src netip.AddrPort) {
 	p := m.pairs[cle]
 	m.mu.RUnlock()
 	if p == nil {
-		m.journal.Info("initiation d'une clé inconnue", "source", src)
-		return
+		m.journal.Info("initiation d'une clé inconnue", "source", o.point, "relais", o.numero)
+		return nil
+	}
+	if !verifierVenue(p, o) {
+		m.journal.Warn("initiation par un chemin inattendu", "relais", o.relais, "numero", o.numero)
+		return nil
 	}
 
 	p.mu.Lock()
@@ -341,12 +528,12 @@ func (m *Moteur) recevoirInitiation(msg []byte, src netip.AddrPort) {
 	// Une initiation qui n'est pas plus récente que la dernière est un
 	// rejeu : on l'ignore sans répondre.
 	if p.dernierHorodatage != nil && bytes.Compare(charge, p.dernierHorodatage) <= 0 {
-		m.journal.Warn("initiation rejouée", "source", src)
-		return
+		m.journal.Warn("initiation rejouée", "source", o.point, "relais", o.numero)
+		return nil
 	}
 	corps, cles, err := r.Message2(nil)
 	if err != nil {
-		return
+		return nil
 	}
 	p.dernierHorodatage = charge
 	locale := indiceAleatoire()
@@ -358,36 +545,41 @@ func (m *Moteur) recevoirInitiation(msg []byte, src netip.AddrPort) {
 	m.indices[locale] = p
 	m.mu.Unlock()
 	// La session n'est promue qu'au premier paquet de données reçu avec
-	// elle : c'est la preuve que le client détient bien les mêmes clés.
+	// elle : c'est la preuve que l'initiateur détient bien les mêmes clés.
 	p.suivante = s
-	if !p.initie {
-		p.point = src
+	if !o.relais && !p.direct.Load() {
+		p.point = o.point
 	}
 	rep := binary.LittleEndian.AppendUint32(entete(typeReponse), locale)
 	rep = binary.LittleEndian.AppendUint32(rep, envoyeur)
-	m.ecrire(append(rep, corps...), src)
+	rep = append(append(rep, corps...), make([]byte, 2*tailleMac)...)
+	signerMacs(rep, p.cles, nil)
+	if o.relais {
+		return []envoi{{msg: rep, relais: o.numero}}
+	}
+	return []envoi{{msg: rep, point: o.point}}
 }
 
-func (m *Moteur) recevoirReponse(msg []byte) {
-	if len(msg) != tailleReponse {
-		return
+func (m *Moteur) recevoirReponse(msg []byte, o origine) []envoi {
+	if len(msg) != tailleReponse || !mac1Valide(msg, *m.nosCles.Load()) {
+		return nil
 	}
 	envoyeur := binary.LittleEndian.Uint32(msg[4:8])
 	dest := binary.LittleEndian.Uint32(msg[8:12])
 	m.mu.RLock()
 	p := m.indices[dest]
 	m.mu.RUnlock()
-	if p == nil {
-		return
+	if p == nil || !verifierVenue(p, o) {
+		return nil
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.poignee == nil || p.indicePoignee != dest {
-		return
+		return nil
 	}
-	_, cles, err := p.poignee.LireMessage2(msg[12:])
+	_, cles, err := p.poignee.LireMessage2(msg[12 : len(msg)-2*tailleMac])
 	if err != nil {
-		return
+		return nil
 	}
 	s := nouvelleSession(dest, envoyeur, cles, true)
 	m.mu.Lock()
@@ -397,26 +589,28 @@ func (m *Moteur) recevoirReponse(msg []byte) {
 	m.mu.Unlock()
 	p.precedente, p.courante = p.courante, s
 	p.poignee, p.indicePoignee = nil, 0
+	now := time.Now()
 	p.debutTentatives = time.Time{}
-	p.dernierePoignee = time.Now()
-	p.derniereReception, p.sansReponseDepuis = p.dernierePoignee, time.Time{}
+	p.dernierePoignee, p.derniereReception, p.sansReponseDepuis = now, now, time.Time{}
 
 	// Les paquets en attente partent. S'il n'y en a pas, un paquet vide
-	// confirme la session au serveur, qui ne s'en sert qu'à partir de là.
+	// confirme la session à l'autre bout, qui ne s'en sert qu'à partir de là.
 	attente := p.attente
 	p.attente = nil
 	if len(attente) == 0 {
 		attente = [][]byte{nil}
 	}
-	for _, paquet := range attente {
-		m.ecrire(s.chiffrer(paquet), p.point)
+	var envois []envoi
+	for _, clair := range attente {
+		envois = append(envois, p.versLui(s.chiffrer(clair)))
 		p.envoyes++
 	}
-	p.dernierEnvoi = time.Now()
+	p.dernierEnvoi = now
+	return envois
 }
 
-func (m *Moteur) recevoirDonnees(msg []byte, src netip.AddrPort) {
-	if len(msg) < enteteDonnees+tailleTag {
+func (m *Moteur) recevoirCookie(msg []byte) {
+	if len(msg) != tailleCookie {
 		return
 	}
 	dest := binary.LittleEndian.Uint32(msg[4:8])
@@ -425,6 +619,31 @@ func (m *Moteur) recevoirDonnees(msg []byte, src netip.AddrPort) {
 	m.mu.RUnlock()
 	if p == nil {
 		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.direct.Load() || p.poignee == nil || p.indicePoignee != dest {
+		return
+	}
+	c, err := lireCookie(msg, p.cles, p.dernierMac1)
+	if err != nil {
+		return
+	}
+	p.cookie, p.cookieRecu = c, time.Now()
+	// La prochaine tentative portera le cookie, sans attendre cinq secondes.
+	p.derniereTentative = time.Time{}
+}
+
+func (m *Moteur) recevoirDonnees(msg []byte, o origine) []envoi {
+	if len(msg) < enteteDonnees+tailleTag {
+		return nil
+	}
+	dest := binary.LittleEndian.Uint32(msg[4:8])
+	m.mu.RLock()
+	p := m.indices[dest]
+	m.mu.RUnlock()
+	if p == nil || !verifierVenue(p, o) {
+		return nil
 	}
 	p.mu.Lock()
 	var s *session
@@ -436,13 +655,14 @@ func (m *Moteur) recevoirDonnees(msg []byte, src netip.AddrPort) {
 	}
 	p.mu.Unlock()
 	if s == nil || time.Since(s.creee) >= rejeterApres {
-		return
+		return nil
 	}
 	clair, ok := s.dechiffrer(msg)
 	if !ok {
-		return
+		return nil
 	}
 
+	var envois []envoi
 	p.mu.Lock()
 	if s == p.suivante {
 		m.mu.Lock()
@@ -453,50 +673,109 @@ func (m *Moteur) recevoirDonnees(msg []byte, src netip.AddrPort) {
 		p.precedente, p.courante, p.suivante = p.courante, s, nil
 		p.dernierePoignee = time.Now()
 	}
-	// Itinérance : le serveur suit l'appareil s'il change de réseau. Seul un
-	// paquet authentifié, et jamais vu, peut déplacer le point.
-	if !p.initie {
-		p.point = src
+	// Itinérance : on suit un appareil qui change de réseau. Seul un paquet
+	// authentifié, et jamais vu, peut déplacer son adresse.
+	if !o.relais && !p.direct.Load() {
+		p.point = o.point
 	}
 	p.recus++
 	now := time.Now()
 	p.derniereReception, p.sansReponseDepuis = now, time.Time{}
-	// Maintien passif : le serveur répond à un maintien s'il est resté
-	// muet. Le client, lui, ne répond jamais aux maintiens, sinon les deux
-	// se renverraient la balle.
-	if len(clair) == 0 && !p.initie && now.Sub(p.dernierEnvoi) >= maintienPassif && p.courante.utilisable() {
-		m.ecrire(p.courante.chiffrer(nil), p.point)
+	if len(clair) > 0 {
+		p.derniereDonnee = now
+	}
+	// Un pair qui ne fait que répondre renvoie un maintien à celui qui en
+	// envoie, s'il est resté muet : l'autre sait ainsi que la liaison vit.
+	// Celui qui initie ne répond jamais aux maintiens, sinon les deux se
+	// renverraient la balle.
+	if len(clair) == 0 && !p.actif() && now.Sub(p.dernierEnvoi) >= maintienPassif && p.courante.utilisable() {
+		envois = append(envois, p.versLui(p.courante.chiffrer(nil)))
 		p.envoyes++
 		p.dernierEnvoi = now
 	}
 	p.mu.Unlock()
 
 	if len(clair) == 0 {
-		return // paquet de maintien
+		return envois // paquet de maintien
+	}
+	if clair[0] == 0 {
+		return append(envois, m.recevoirTrame(p, clair)...)
 	}
 	ip, ok := lireIPv4(clair)
 	if !ok {
-		return
+		return envois
 	}
 	if !p.autorise(netip.AddrFrom4(ip.source)) {
-		m.journal.Warn("source usurpée", "source", netip.AddrFrom4(ip.source), "point", src)
-		return
+		m.journal.Warn("source usurpée", "source", netip.AddrFrom4(ip.source), "numero", p.numero.Load())
+		return envois
+	}
+	if !p.entrant.Load().autorise(ip) && !m.suivi.retour(ip) {
+		return envois
 	}
 	m.tun.Write(clair[:ip.longueur])
+	return envois
+}
+
+// recevoirTrame traite une trame de relais sortie d'une session.
+//
+// Sur le serveur, elle vient d'un appareil et doit partir vers un autre :
+// on vérifie que la politique autorise ces deux-là à se parler, puis on la
+// remet au destinataire en indiquant qui l'envoie. Le message qu'elle
+// contient reste illisible : il est chiffré pour le destinataire.
+//
+// Chez un client, elle vient du serveur et contient un message d'un autre
+// appareil, traité comme s'il arrivait directement de lui.
+func (m *Moteur) recevoirTrame(de *pair, trame []byte) []envoi {
+	numero, msg, ok := lireTrame(trame)
+	if !ok || len(msg) < 4 || msg[0] < typeInitiation || msg[0] > typeDonnees {
+		return nil
+	}
+	if m.relais != nil {
+		source := de.numero.Load()
+		if source == 0 || !m.relais(source, numero) {
+			return nil
+		}
+		m.mu.RLock()
+		vers := m.parNumero[numero]
+		m.mu.RUnlock()
+		if vers == nil || vers == de {
+			return nil
+		}
+		if sonde := m.sondeRelais.Load(); sonde != nil {
+			(*sonde)(msg)
+		}
+		return m.envoyerClair(vers, trameRelais(source, msg))
+	}
+	m.mu.RLock()
+	serveur := m.serveur
+	m.mu.RUnlock()
+	if de != serveur {
+		return nil // seul le serveur relaie
+	}
+	return m.recevoirRelaye(msg, origine{relais: true, numero: numero})
+}
+
+// recevoirRelaye : un message d'un autre appareil, sorti d'une trame. Il
+// suit le même chemin qu'un message direct, à ceci près qu'on y répond par
+// relais.
+func (m *Moteur) recevoirRelaye(msg []byte, o origine) []envoi {
+	switch msg[0] {
+	case typeInitiation:
+		return m.recevoirInitiation(msg, o)
+	case typeReponse:
+		return m.recevoirReponse(msg, o)
+	case typeDonnees:
+		return m.recevoirDonnees(msg, o)
+	}
+	return nil
 }
 
 // --- minuterie ---------------------------------------------------------------
 
 func (m *Moteur) minuterie() {
-	m.mu.RLock()
-	liste := make([]*pair, 0, len(m.pairs))
-	for _, p := range m.pairs {
-		liste = append(liste, p)
-	}
-	m.mu.RUnlock()
-
 	now := time.Now()
-	for _, p := range liste {
+	for _, p := range m.listePairs() {
+		var envois []envoi
 		p.mu.Lock()
 		for _, s := range []**session{&p.precedente, &p.courante, &p.suivante} {
 			if *s != nil && now.Sub((*s).creee) >= rejeterApres {
@@ -506,26 +785,41 @@ func (m *Moteur) minuterie() {
 				*s = nil
 			}
 		}
-		if p.initie {
+		if p.actif() {
 			// Session à renouveler, ou morte de l'autre côté : des données
 			// sont parties sans retour, ou même les maintiens ne reviennent
 			// plus.
 			morte := (!p.sansReponseDepuis.IsZero() && now.Sub(p.sansReponseDepuis) > m.sansReponseMax) ||
 				(p.maintien > 0 && p.courante != nil && now.Sub(p.derniereReception) > p.maintien+m.sansReponseMax)
-			if p.courante.aRenouveler() || morte {
-				m.lancerPoignee(p)
+			// La session avec le serveur reste toujours ouverte : c'est par
+			// elle que les autres appareils nous joignent. Celles avec les
+			// autres appareils ne s'ouvrent qu'à la demande, quand un paquet
+			// attend.
+			aOuvrir := p.courante.aRenouveler() && (p.direct.Load() || len(p.attente) > 0)
+			if aOuvrir || morte {
+				envois = append(envois, m.lancerPoignee(p)...)
 			}
 			if p.maintien > 0 && p.courante.utilisable() && now.Sub(p.dernierEnvoi) >= p.maintien {
-				m.ecrire(p.courante.chiffrer(nil), p.point)
+				envois = append(envois, p.versLui(p.courante.chiffrer(nil)))
 				p.envoyes++
 				p.dernierEnvoi = now
 			}
-			// Serveur injoignable depuis trop longtemps : on ne garde pas
+			// Injoignable depuis trop longtemps : on ne garde pas
 			// indéfiniment de vieux paquets.
 			if !p.debutTentatives.IsZero() && now.Sub(p.debutTentatives) > abandonnerApres {
 				p.attente = nil
 			}
 		}
+		// Maintien passif : des données reçues, rien renvoyé depuis dix
+		// secondes. Un paquet vide dit à l'autre que la session vit.
+		if p.courante.utilisable() && p.derniereDonnee.After(p.dernierEnvoi) && now.Sub(p.derniereDonnee) >= maintienPassif {
+			envois = append(envois, p.versLui(p.courante.chiffrer(nil)))
+			p.envoyes++
+			p.dernierEnvoi = now
+		}
 		p.mu.Unlock()
+		m.expedier(envois)
 	}
+	m.suivi.nettoyer()
+	m.charge.nettoyer()
 }

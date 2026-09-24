@@ -1,8 +1,10 @@
 package tunnel
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdh"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -14,6 +16,8 @@ import (
 	"github.com/Cybertrist/CyberSas/internal/noise"
 )
 
+// --- outils ------------------------------------------------------------------
+
 // tunFactice : une interface virtuelle en mémoire. Ce que le moteur écrit
 // arrive dans sortie ; ce qu'on pousse dans entree, le moteur le lit.
 type tunFactice struct {
@@ -23,7 +27,7 @@ type tunFactice struct {
 }
 
 func nouveauTun() *tunFactice {
-	return &tunFactice{entree: make(chan []byte, 16), sortie: make(chan []byte, 16), ferme: make(chan struct{})}
+	return &tunFactice{entree: make(chan []byte, 64), sortie: make(chan []byte, 64), ferme: make(chan struct{})}
 }
 
 func (t *tunFactice) Read(b []byte) (int, error) {
@@ -42,24 +46,35 @@ func (t *tunFactice) Write(b []byte) (int, error) {
 
 func (t *tunFactice) Close() error { t.once.Do(func() { close(t.ferme) }); return nil }
 
-// paquet IPv4 minimal, sans somme de contrôle : le moteur ne la lit pas.
-func paquet(source, dest string, charge string) []byte {
-	p := make([]byte, 20+len(charge))
+// paquet construit un paquet IPv4 minimal. Avec un port, c'est du TCP, et
+// la charge suit l'en-tête TCP de vingt octets.
+func paquetTCP(source, dest string, portSrc, portDst uint16, charge string) []byte {
+	p := make([]byte, 40+len(charge))
 	p[0] = 0x45
 	binary.BigEndian.PutUint16(p[2:4], uint16(len(p)))
+	p[9] = protoTCP
 	s, d := netip.MustParseAddr(source).As4(), netip.MustParseAddr(dest).As4()
 	copy(p[12:16], s[:])
 	copy(p[16:20], d[:])
-	copy(p[20:], charge)
+	binary.BigEndian.PutUint16(p[20:22], portSrc)
+	binary.BigEndian.PutUint16(p[22:24], portDst)
+	p[32] = 0x50
+	copy(p[40:], charge)
 	return p
 }
+
+func paquet(source, dest string, charge string) []byte {
+	return paquetTCP(source, dest, 40000, 80, charge)
+}
+
+func contenu(p []byte) string { return string(p[40:]) }
 
 func attendre(t *testing.T, c chan []byte) []byte {
 	t.Helper()
 	select {
 	case p := <-c:
 		return p
-	case <-time.After(3 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("rien n'est sorti du tunnel")
 		return nil
 	}
@@ -69,8 +84,8 @@ func rienNeSort(t *testing.T, c chan []byte) {
 	t.Helper()
 	select {
 	case p := <-c:
-		t.Fatalf("un paquet est sorti alors qu'il aurait dû être rejeté : %q", p[20:])
-	case <-time.After(400 * time.Millisecond):
+		t.Fatalf("un paquet est sorti alors qu'il aurait dû être rejeté : %q", contenu(p))
+	case <-time.After(500 * time.Millisecond):
 	}
 }
 
@@ -79,63 +94,83 @@ func publique(k *ecdh.PrivateKey) (r [32]byte) {
 	return
 }
 
+func prefixe(s string) []netip.Prefix { return []netip.Prefix{netip.MustParsePrefix(s)} }
+
+func ecouter(t *testing.T) *net.UDPConn {
+	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+type noeud struct {
+	cle    *ecdh.PrivateKey
+	tun    *tunFactice
+	conn   *net.UDPConn
+	moteur *Moteur
+}
+
+func (n *noeud) port() netip.AddrPort { return n.conn.LocalAddr().(*net.UDPAddr).AddrPort() }
+
+func lancer(t *testing.T, ctx context.Context, cfg Config) *noeud {
+	n := &noeud{tun: nouveauTun(), conn: ecouter(t)}
+	n.cle, _ = noise.GenererCle()
+	cfg.Prive, cfg.Tun, cfg.Conn = n.cle, n.tun, n.conn
+	n.moteur = Nouveau(cfg)
+	go n.moteur.Lancer(ctx)
+	return n
+}
+
+// --- un client et le serveur ---------------------------------------------------
+
 type banc struct {
-	serveurTun, clientTun *tunFactice
-	serveurPort           netip.AddrPort
-	clientConn            *net.UDPConn
-	clePrivee             *ecdh.PrivateKey
-	clePubliqueServeur    [32]byte
-	annuler               context.CancelFunc
-	// capture : tout ce que le client envoie passe par ce relais, pour
+	serveur, client *noeud
+	relais          *net.UDPConn
+	// capture : tout ce que le client envoie passe par ce relais UDP, pour
 	// pouvoir rejouer ou abîmer des paquets.
 	capture chan []byte
 }
 
 func nouveauBanc(t *testing.T) *banc {
-	cleServeur, _ := noise.GenererCle()
-	cleClient, _ := noise.GenererCle()
-	b := &banc{serveurTun: nouveauTun(), clientTun: nouveauTun(), clePrivee: cleClient, clePubliqueServeur: publique(cleServeur), capture: make(chan []byte, 64)}
-
-	cs, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	cc, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	relais, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	b.serveurPort = cs.LocalAddr().(*net.UDPAddr).AddrPort()
-	b.clientConn = cc
-
 	ctx, annuler := context.WithCancel(context.Background())
-	b.annuler = annuler
-	t.Cleanup(func() { annuler(); relais.Close() })
+	t.Cleanup(annuler)
+	b := &banc{capture: make(chan []byte, 256)}
+	b.serveur = lancer(t, ctx, Config{})
+	b.relais = ecouter(t)
+	t.Cleanup(func() { b.relais.Close() })
+	b.client = &noeud{tun: nouveauTun(), conn: ecouter(t)}
+	b.client.cle, _ = noise.GenererCle()
 
-	// Relais client <-> serveur : copie aussi chaque paquet du client.
 	go func() {
 		buf := make([]byte, 2048)
 		var client netip.AddrPort
 		for {
-			n, src, err := relais.ReadFromUDPAddrPort(buf)
+			n, src, err := b.relais.ReadFromUDPAddrPort(buf)
 			if err != nil {
 				return
 			}
-			if src == b.serveurPort {
-				relais.WriteToUDPAddrPort(buf[:n], client)
+			if src == b.serveur.port() {
+				b.relais.WriteToUDPAddrPort(buf[:n], client)
 				continue
 			}
 			client = src
-			b.capture <- append([]byte(nil), buf[:n]...)
-			relais.WriteToUDPAddrPort(buf[:n], b.serveurPort)
+			select {
+			case b.capture <- append([]byte(nil), buf[:n]...):
+			default:
+			}
+			b.relais.WriteToUDPAddrPort(buf[:n], b.serveur.port())
 		}
 	}()
 
-	serveur := Nouveau(cleServeur, b.serveurTun, cs, nil)
-	serveur.DefinirPairs([]Pair{{Publique: publique(cleClient), Adresses: []netip.Prefix{netip.MustParsePrefix("10.77.0.2/32")}}})
-	client := Nouveau(cleClient, b.clientTun, cc, nil)
-	client.DefinirPairs([]Pair{{Publique: publique(cleServeur), Adresses: []netip.Prefix{netip.MustParsePrefix("10.77.0.0/24")},
-		Point: relais.LocalAddr().(*net.UDPAddr).AddrPort()}})
-	go serveur.Lancer(ctx)
-	go client.Lancer(ctx)
+	b.serveur.moteur.DefinirPairs([]Pair{{Publique: publique(b.client.cle), Adresses: prefixe("10.77.0.2/32"), Numero: 2, ToutEntrant: true}})
+	b.client.moteur = Nouveau(Config{Prive: b.client.cle, Tun: b.client.tun, Conn: b.client.conn})
+	b.client.moteur.DefinirPairs([]Pair{{Publique: publique(b.serveur.cle), Adresses: prefixe("10.77.0.1/32"),
+		Point: b.relais.LocalAddr().(*net.UDPAddr).AddrPort(), ToutEntrant: true}})
+	go b.client.moteur.Lancer(ctx)
 	return b
 }
 
-// Le dernier paquet de données envoyé par le client et capturé au relais.
 func (b *banc) dernierPaquetDonnees(t *testing.T) []byte {
 	var dernier []byte
 	for {
@@ -155,53 +190,53 @@ func (b *banc) dernierPaquetDonnees(t *testing.T) []byte {
 
 func TestAllerRetour(t *testing.T) {
 	b := nouveauBanc(t)
-	b.clientTun.entree <- paquet("10.77.0.2", "10.77.0.1", "bonjour")
-	if got := attendre(t, b.serveurTun.sortie); string(got[20:]) != "bonjour" {
-		t.Fatalf("le serveur a reçu %q", got[20:])
+	b.client.tun.entree <- paquet("10.77.0.2", "10.77.0.1", "bonjour")
+	if got := attendre(t, b.serveur.tun.sortie); contenu(got) != "bonjour" {
+		t.Fatalf("le serveur a reçu %q", contenu(got))
 	}
-	b.serveurTun.entree <- paquet("10.77.0.1", "10.77.0.2", "salut")
-	if got := attendre(t, b.clientTun.sortie); string(got[20:]) != "salut" {
-		t.Fatalf("le client a reçu %q", got[20:])
+	b.serveur.tun.entree <- paquetTCP("10.77.0.1", "10.77.0.2", 80, 40000, "salut")
+	if got := attendre(t, b.client.tun.sortie); contenu(got) != "salut" {
+		t.Fatalf("le client a reçu %q", contenu(got))
 	}
 }
 
 func TestRejeuRefuse(t *testing.T) {
 	b := nouveauBanc(t)
-	b.clientTun.entree <- paquet("10.77.0.2", "10.77.0.1", "virement")
-	attendre(t, b.serveurTun.sortie)
+	b.client.tun.entree <- paquet("10.77.0.2", "10.77.0.1", "virement")
+	attendre(t, b.serveur.tun.sortie)
 	capture := b.dernierPaquetDonnees(t)
 	// Un attaquant renvoie le paquet capturé, depuis ailleurs.
-	b.clientConn.WriteToUDPAddrPort(capture, b.serveurPort)
-	rienNeSort(t, b.serveurTun.sortie)
+	b.client.conn.WriteToUDPAddrPort(capture, b.serveur.port())
+	rienNeSort(t, b.serveur.tun.sortie)
 }
 
 func TestPaquetModifieRefuse(t *testing.T) {
 	b := nouveauBanc(t)
-	b.clientTun.entree <- paquet("10.77.0.2", "10.77.0.1", "premier")
-	attendre(t, b.serveurTun.sortie)
+	b.client.tun.entree <- paquet("10.77.0.2", "10.77.0.1", "premier")
+	attendre(t, b.serveur.tun.sortie)
 	capture := b.dernierPaquetDonnees(t)
 	// Compteur neuf, contenu abîmé : le tag ne correspond plus.
 	binary.LittleEndian.PutUint64(capture[8:16], 1000)
 	capture[len(capture)-20] ^= 0xff
-	b.clientConn.WriteToUDPAddrPort(capture, b.serveurPort)
-	rienNeSort(t, b.serveurTun.sortie)
+	b.client.conn.WriteToUDPAddrPort(capture, b.serveur.port())
+	rienNeSort(t, b.serveur.tun.sortie)
 }
 
 func TestSourceUsurpeeRefusee(t *testing.T) {
 	b := nouveauBanc(t)
 	// Le client est 10.77.0.2 : il ne peut pas parler au nom de 10.77.0.9.
-	b.clientTun.entree <- paquet("10.77.0.9", "10.77.0.1", "c'est moi le 9")
-	rienNeSort(t, b.serveurTun.sortie)
-	b.clientTun.entree <- paquet("10.77.0.2", "10.77.0.1", "vraiment moi")
-	if got := attendre(t, b.serveurTun.sortie); string(got[20:]) != "vraiment moi" {
-		t.Fatalf("reçu %q", got[20:])
+	b.client.tun.entree <- paquet("10.77.0.9", "10.77.0.1", "c'est moi le 9")
+	rienNeSort(t, b.serveur.tun.sortie)
+	b.client.tun.entree <- paquet("10.77.0.2", "10.77.0.1", "vraiment moi")
+	if got := attendre(t, b.serveur.tun.sortie); contenu(got) != "vraiment moi" {
+		t.Fatalf("reçu %q", contenu(got))
 	}
 }
 
 func TestInitiationRejoueeIgnoree(t *testing.T) {
 	b := nouveauBanc(t)
-	b.clientTun.entree <- paquet("10.77.0.2", "10.77.0.1", "a")
-	attendre(t, b.serveurTun.sortie)
+	b.client.tun.entree <- paquet("10.77.0.2", "10.77.0.1", "a")
+	attendre(t, b.serveur.tun.sortie)
 	var initiation []byte
 	for len(b.capture) > 0 {
 		if p := <-b.capture; p[0] == typeInitiation {
@@ -211,11 +246,10 @@ func TestInitiationRejoueeIgnoree(t *testing.T) {
 	if initiation == nil {
 		t.Fatal("pas d'initiation capturée")
 	}
-	// Rejouée, l'initiation ne doit obtenir aucune réponse.
-	espion, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	espion := ecouter(t)
 	defer espion.Close()
-	espion.WriteToUDPAddrPort(initiation, b.serveurPort)
-	espion.SetReadDeadline(time.Now().Add(400 * time.Millisecond))
+	espion.WriteToUDPAddrPort(initiation, b.serveur.port())
+	espion.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 	if _, _, err := espion.ReadFromUDPAddrPort(make([]byte, 256)); err == nil {
 		t.Fatal("le serveur a répondu à une initiation rejouée")
 	}
@@ -223,46 +257,80 @@ func TestInitiationRejoueeIgnoree(t *testing.T) {
 
 func TestCleInconnueRefusee(t *testing.T) {
 	b := nouveauBanc(t)
-	// Un intrus qui connaît la clé publique du serveur, et même l'adresse
-	// d'un appareil, mais dont la clé n'est pas dans la liste.
-	intrus, _ := noise.GenererCle()
-	conn, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	tunIntrus := nouveauTun()
-	m := Nouveau(intrus, tunIntrus, conn, nil)
-	m.DefinirPairs([]Pair{{Publique: b.clePubliqueServeur, Adresses: []netip.Prefix{netip.MustParsePrefix("10.77.0.0/24")}, Point: b.serveurPort}})
 	ctx, annuler := context.WithCancel(context.Background())
 	defer annuler()
-	go m.Lancer(ctx)
-
-	tunIntrus.entree <- paquet("10.77.0.2", "10.77.0.1", "laissez-moi entrer")
-	rienNeSort(t, b.serveurTun.sortie)
-	for _, e := range m.Etat() {
+	// Un intrus qui connaît la clé publique du serveur, mais n'est pas
+	// inscrit.
+	intrus := lancer(t, ctx, Config{})
+	intrus.moteur.DefinirPairs([]Pair{{Publique: publique(b.serveur.cle), Adresses: prefixe("10.77.0.1/32"), Point: b.serveur.port()}})
+	intrus.tun.entree <- paquet("10.77.0.2", "10.77.0.1", "laissez-moi entrer")
+	rienNeSort(t, b.serveur.tun.sortie)
+	for _, e := range intrus.moteur.Etat() {
 		if !e.DernierePoignee.IsZero() {
 			t.Fatal("l'intrus a obtenu une session")
 		}
 	}
 }
 
+func TestMac1SansLaCleDuServeur(t *testing.T) {
+	b := nouveauBanc(t)
+	// Sans la clé publique du serveur, impossible de produire un mac1 :
+	// le serveur ne déchiffre rien, et ne répond rien.
+	faux := make([]byte, tailleInitiation)
+	rand.Read(faux)
+	faux[0] = typeInitiation
+	espion := ecouter(t)
+	defer espion.Close()
+	espion.WriteToUDPAddrPort(faux, b.serveur.port())
+	espion.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	if _, _, err := espion.ReadFromUDPAddrPort(make([]byte, 256)); err == nil {
+		t.Fatal("le serveur a répondu à une initiation sans mac1 valide")
+	}
+}
+
+func TestCookieSousCharge(t *testing.T) {
+	ctx, annuler := context.WithCancel(context.Background())
+	defer annuler()
+	// Un serveur toujours « sous charge » : chaque initiation doit porter
+	// un cookie valide.
+	serveur := lancer(t, ctx, Config{SeuilCharge: -1})
+	client := lancer(t, ctx, Config{})
+	serveur.moteur.DefinirPairs([]Pair{{Publique: publique(client.cle), Adresses: prefixe("10.77.0.2/32"), ToutEntrant: true}})
+	client.moteur.DefinirPairs([]Pair{{Publique: publique(serveur.cle), Adresses: prefixe("10.77.0.1/32"), Point: serveur.port(), ToutEntrant: true}})
+
+	limite := time.Now().Add(10 * time.Second)
+	for time.Now().Before(limite) {
+		client.tun.entree <- paquet("10.77.0.2", "10.77.0.1", "avec cookie")
+		select {
+		case p := <-serveur.tun.sortie:
+			if contenu(p) == "avec cookie" {
+				return
+			}
+		case <-time.After(time.Second):
+		}
+	}
+	t.Fatal("le client n'a pas obtenu de session avec un cookie")
+}
+
 func TestServeurRedemarre(t *testing.T) {
 	cleServeur, _ := noise.GenererCle()
 	cleClient, _ := noise.GenererCle()
-	cs, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	cc, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	cs, cc := ecouter(t), ecouter(t)
 	port := cs.LocalAddr().(*net.UDPAddr).AddrPort()
-	pairClient := []Pair{{Publique: publique(cleClient), Adresses: []netip.Prefix{netip.MustParsePrefix("10.77.0.2/32")}}}
+	pairClient := []Pair{{Publique: publique(cleClient), Adresses: prefixe("10.77.0.2/32"), ToutEntrant: true}}
 
 	ctxS, arretS := context.WithCancel(context.Background())
 	tunS := nouveauTun()
-	s := Nouveau(cleServeur, tunS, cs, nil)
+	s := Nouveau(Config{Prive: cleServeur, Tun: tunS, Conn: cs})
 	s.DefinirPairs(pairClient)
 	go s.Lancer(ctxS)
 
 	ctx, annuler := context.WithCancel(context.Background())
 	defer annuler()
 	tunC := nouveauTun()
-	c := Nouveau(cleClient, tunC, cc, nil)
+	c := Nouveau(Config{Prive: cleClient, Tun: tunC, Conn: cc})
 	c.sansReponseMax = time.Second
-	c.DefinirPairs([]Pair{{Publique: publique(cleServeur), Adresses: []netip.Prefix{netip.MustParsePrefix("10.77.0.0/24")}, Point: port}})
+	c.DefinirPairs([]Pair{{Publique: publique(cleServeur), Adresses: prefixe("10.77.0.1/32"), Point: port, ToutEntrant: true}})
 	go c.Lancer(ctx)
 
 	tunC.entree <- paquet("10.77.0.2", "10.77.0.1", "avant")
@@ -276,7 +344,7 @@ func TestServeurRedemarre(t *testing.T) {
 		t.Fatal(err)
 	}
 	tunS2 := nouveauTun()
-	s2 := Nouveau(cleServeur, tunS2, cs2, nil)
+	s2 := Nouveau(Config{Prive: cleServeur, Tun: tunS2, Conn: cs2})
 	s2.DefinirPairs(pairClient)
 	go s2.Lancer(ctx)
 
@@ -288,7 +356,7 @@ func TestServeurRedemarre(t *testing.T) {
 		tunC.entree <- paquet("10.77.0.2", "10.77.0.1", "après")
 		select {
 		case p := <-tunS2.sortie:
-			if string(p[20:]) == "après" {
+			if contenu(p) == "après" {
 				return
 			}
 		case <-time.After(time.Second):
@@ -296,6 +364,135 @@ func TestServeurRedemarre(t *testing.T) {
 	}
 	t.Fatal("le client ne s'est pas reconnecté au serveur redémarré")
 }
+
+// --- deux appareils, de bout en bout ------------------------------------------
+
+// reseau : un serveur et deux appareils, A (10.77.0.2, numéro 2) et
+// B (10.77.0.3, numéro 3). B accepte le TCP 80 venant de A.
+type reseau struct {
+	serveur, a, b *noeud
+	relie         bool // le serveur relaie-t-il entre A et B ?
+	mu            sync.Mutex
+}
+
+func nouveauReseau(t *testing.T, relie bool) *reseau {
+	ctx, annuler := context.WithCancel(context.Background())
+	t.Cleanup(annuler)
+	r := &reseau{relie: relie}
+	r.serveur = lancer(t, ctx, Config{Relais: func(de, vers uint32) bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.relie && ((de == 2 && vers == 3) || (de == 3 && vers == 2))
+	}})
+	r.a = lancer(t, ctx, Config{})
+	r.b = lancer(t, ctx, Config{})
+	r.serveur.moteur.DefinirPairs([]Pair{
+		{Publique: publique(r.a.cle), Adresses: prefixe("10.77.0.2/32"), Numero: 2, ToutEntrant: true},
+		{Publique: publique(r.b.cle), Adresses: prefixe("10.77.0.3/32"), Numero: 3, ToutEntrant: true},
+	})
+	versServeur := Pair{Publique: publique(r.serveur.cle), Adresses: prefixe("10.77.0.1/32"), Point: r.serveur.port(), ToutEntrant: true}
+	r.a.moteur.DefinirPairs([]Pair{versServeur,
+		// A n'accepte rien de B : les réponses passent par le suivi.
+		{Publique: publique(r.b.cle), Adresses: prefixe("10.77.0.3/32"), Numero: 3, ParRelais: true}})
+	r.b.moteur.DefinirPairs([]Pair{versServeur,
+		{Publique: publique(r.a.cle), Adresses: prefixe("10.77.0.2/32"), Numero: 2, ParRelais: true,
+			Entrant: []Regle{{Proto: protoTCP, Debut: 80, Fin: 80}}}})
+	// Comme en vrai, chaque appareil a d'abord sa session avec le serveur :
+	// sans elle, personne ne peut le joindre.
+	for _, n := range []*noeud{r.a, r.b} {
+		connecteAuServeur(t, n, publique(r.serveur.cle))
+	}
+	return r
+}
+
+func connecteAuServeur(t *testing.T, n *noeud, serveur [32]byte) {
+	t.Helper()
+	limite := time.Now().Add(5 * time.Second)
+	for time.Now().Before(limite) {
+		for _, e := range n.moteur.Etat() {
+			if e.Publique == serveur && !e.DernierePoignee.IsZero() {
+				return
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("un appareil ne s'est pas connecté au serveur")
+}
+
+func TestBoutEnBout(t *testing.T) {
+	r := nouveauReseau(t, true)
+	r.a.tun.entree <- paquetTCP("10.77.0.2", "10.77.0.3", 40000, 80, "secret de A pour B")
+	if got := attendre(t, r.b.tun.sortie); contenu(got) != "secret de A pour B" {
+		t.Fatalf("B a reçu %q", contenu(got))
+	}
+	// Le serveur a relayé sans rien voir : rien n'est sorti chez lui.
+	rienNeSort(t, r.serveur.tun.sortie)
+
+	// La réponse de B entre chez A, qui n'a pourtant aucune règle pour B :
+	// elle répond à un flux que A a ouvert.
+	r.b.tun.entree <- paquetTCP("10.77.0.3", "10.77.0.2", 80, 40000, "réponse de B")
+	if got := attendre(t, r.a.tun.sortie); contenu(got) != "réponse de B" {
+		t.Fatalf("A a reçu %q", contenu(got))
+	}
+}
+
+func TestFiltreDuDestinataire(t *testing.T) {
+	r := nouveauReseau(t, true)
+	// B n'accepte de A que le port 80 : le 22 ne passe pas.
+	r.a.tun.entree <- paquetTCP("10.77.0.2", "10.77.0.3", 40001, 22, "ssh")
+	rienNeSort(t, r.b.tun.sortie)
+	// Et B ne peut pas ouvrir de connexion vers A, qui n'accepte rien de lui.
+	r.b.tun.entree <- paquetTCP("10.77.0.3", "10.77.0.2", 40002, 80, "coucou A")
+	rienNeSort(t, r.a.tun.sortie)
+	// Le port 80, lui, passe.
+	r.a.tun.entree <- paquetTCP("10.77.0.2", "10.77.0.3", 40003, 80, "web")
+	if got := attendre(t, r.b.tun.sortie); contenu(got) != "web" {
+		t.Fatalf("B a reçu %q", contenu(got))
+	}
+}
+
+func TestRelaisRefuseSansRelation(t *testing.T) {
+	r := nouveauReseau(t, false)
+	// La politique ne relie pas A et B : le serveur ne relaie même pas la
+	// poignée de main.
+	r.a.tun.entree <- paquetTCP("10.77.0.2", "10.77.0.3", 40000, 80, "psst")
+	rienNeSort(t, r.b.tun.sortie)
+	for _, e := range r.a.moteur.Etat() {
+		if e.Numero == 3 && !e.DernierePoignee.IsZero() {
+			t.Fatal("A a obtenu une session avec B sans que la politique les relie")
+		}
+	}
+}
+
+func TestLeServeurNeLitPasCeQuIlRelaie(t *testing.T) {
+	r := nouveauReseau(t, true)
+	// La sonde voit exactement ce que le serveur a en clair après avoir
+	// ouvert la couche transport : le message qu'il relaie.
+	var mu sync.Mutex
+	var vus [][]byte
+	sonde := func(msg []byte) {
+		mu.Lock()
+		vus = append(vus, append([]byte(nil), msg...))
+		mu.Unlock()
+	}
+	r.serveur.moteur.sondeRelais.Store(&sonde)
+	r.a.tun.entree <- paquetTCP("10.77.0.2", "10.77.0.3", 40000, 80, "MARQUEUR-SECRET-123")
+	if got := attendre(t, r.b.tun.sortie); contenu(got) != "MARQUEUR-SECRET-123" {
+		t.Fatalf("B a reçu %q", contenu(got))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(vus) == 0 {
+		t.Fatal("la sonde n'a rien vu passer : le test ne prouve rien")
+	}
+	for _, m := range vus {
+		if bytes.Contains(m, []byte("MARQUEUR")) {
+			t.Fatal("le serveur a vu le contenu du paquet en clair")
+		}
+	}
+}
+
+// --- pièces détachées ----------------------------------------------------------
 
 func TestFenetreAntiRejeu(t *testing.T) {
 	var f fenetre
@@ -314,5 +511,18 @@ func TestFenetreAntiRejeu(t *testing.T) {
 	}
 	if !f.accepter(5000) || f.accepter(5000-tailleFenetre) {
 		t.Fatal("un compteur sorti de la fenêtre doit être refusé")
+	}
+}
+
+func TestTrameRelais(t *testing.T) {
+	msg := []byte{typeDonnees, 0, 0, 0, 1, 2, 3}
+	tr := append(trameRelais(7, msg), 0, 0, 0, 0) // remplissage de la couche transport
+	n, m, ok := lireTrame(tr)
+	if !ok || n != 7 || !bytes.Equal(m, msg) {
+		t.Fatalf("trame mal relue : %d %v %v", n, m, ok)
+	}
+	tr[3] = 200 // longueur plus grande que la trame
+	if _, _, ok := lireTrame(tr); ok {
+		t.Fatal("une trame à la longueur mensongère a été acceptée")
 	}
 }

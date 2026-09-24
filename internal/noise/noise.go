@@ -182,7 +182,10 @@ func (i *Initiateur) Message1(charge []byte) ([]byte, error) {
 		return nil, errors.New("noise : message 1 déjà envoyé")
 	}
 	var err error
-	if i.e, err = GenererCle(); err != nil {
+	if i.e == nil {
+		i.e, err = GenererCle()
+	}
+	if err != nil {
 		return nil, err
 	}
 	e := i.e.PublicKey().Bytes()
@@ -274,7 +277,10 @@ func (r *Repondeur) Message2(charge []byte) ([]byte, Cles, error) {
 		return nil, Cles{}, errors.New("noise : message 1 pas encore lu")
 	}
 	var err error
-	if r.e, err = GenererCle(); err != nil {
+	if r.e == nil {
+		r.e, err = GenererCle()
+	}
+	if err != nil {
 		return nil, Cles{}, err
 	}
 	e := r.e.PublicKey().Bytes()
@@ -290,3 +296,9 @@ func (r *Repondeur) Message2(charge []byte) ([]byte, Cles, error) {
 	aller, retour := r.es.separer()
 	return msg, Cles{Envoi: retour, Reception: aller}, nil
 }
+
+// HachagePoignee rend h à la fin de la poignée de main : les deux côtés
+// doivent obtenir la même valeur. Sert aux vecteurs de test officiels, et
+// pourra lier une session à la poignée de main qui l'a créée.
+func (i *Initiateur) HachagePoignee() [32]byte { return i.es.h }
+func (r *Repondeur) HachagePoignee() [32]byte  { return r.es.h }

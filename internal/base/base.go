@@ -19,7 +19,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-var ErrIntrouvable = errors.New("introuvable")
+var (
+	ErrIntrouvable       = errors.New("introuvable")
+	ErrAutreProprietaire = errors.New("cette clé est déjà inscrite pour quelqu'un d'autre")
+)
 
 type Base struct {
 	db *sql.DB
@@ -35,6 +38,7 @@ type Appareil struct {
 	Systeme      string
 	Cree, Vu     time.Time
 	Expire       time.Time // zéro : n'expire pas
+	Signature    []byte    // du verrou, sur la clé et l'adresse ; vide sans verrou
 }
 
 const schema = `
@@ -49,7 +53,8 @@ CREATE TABLE IF NOT EXISTS appareils (
 	cree         INTEGER NOT NULL,
 	vu           INTEGER NOT NULL,
 	expire       INTEGER NOT NULL DEFAULT 0,
-	jeton        BLOB
+	jeton        BLOB,
+	signature    BLOB
 );
 CREATE TABLE IF NOT EXISTS cles (
 	empreinte   BLOB PRIMARY KEY,
@@ -66,7 +71,27 @@ func Ouvrir(chemin string) (*Base, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("schéma : %w", err)
 	}
+	// Une base créée avant le verrou n'a pas la colonne : on l'ajoute.
+	if _, err := db.Exec(`ALTER TABLE appareils ADD COLUMN signature BLOB`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		return nil, fmt.Errorf("migration : %w", err)
+	}
 	return &Base{db: db}, nil
+}
+
+// DefinirSignature enregistre la signature du verrou pour un appareil.
+// Elle n'est valable que pour cette clé et cette adresse : l'appelant l'a
+// vérifiée avant.
+func (b *Base) DefinirSignature(clePublique string, adresse netip.Addr, signature []byte) error {
+	r, err := b.db.Exec(`UPDATE appareils SET signature = ? WHERE cle_publique = ? AND adresse = ?`,
+		signature, clePublique, adresse.String())
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrIntrouvable
+	}
+	return nil
 }
 
 func Empreinte(s string) []byte {
@@ -74,13 +99,13 @@ func Empreinte(s string) []byte {
 	return h[:]
 }
 
-const colonnes = `id, nom, cle_publique, adresse, proprietaire, etiquette, systeme, cree, vu, expire`
+const colonnes = `id, nom, cle_publique, adresse, proprietaire, etiquette, systeme, cree, vu, expire, signature`
 
 func lire(r interface{ Scan(...any) error }) (Appareil, error) {
 	var a Appareil
 	var adresse string
 	var cree, vu, expire int64
-	if err := r.Scan(&a.ID, &a.Nom, &a.ClePublique, &adresse, &a.Proprietaire, &a.Etiquette, &a.Systeme, &cree, &vu, &expire); err != nil {
+	if err := r.Scan(&a.ID, &a.Nom, &a.ClePublique, &adresse, &a.Proprietaire, &a.Etiquette, &a.Systeme, &cree, &vu, &expire, &a.Signature); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return a, ErrIntrouvable
 		}
@@ -164,9 +189,15 @@ func (b *Base) Enregistrer(a Appareil, jeton string, reseau netip.Prefix, serveu
 	existant, err := lire(tx.QueryRow(`SELECT `+colonnes+` FROM appareils WHERE cle_publique = ?`, a.ClePublique))
 	switch {
 	case err == nil:
-		a.ID, a.Adresse, a.Cree, a.Nom = existant.ID, existant.Adresse, existant.Cree, existant.Nom
-		_, err = tx.Exec(`UPDATE appareils SET proprietaire=?, etiquette=?, systeme=?, vu=?, expire=?, jeton=? WHERE id=?`,
-			a.Proprietaire, a.Etiquette, a.Systeme, now, expire, Empreinte(jeton), a.ID)
+		// Une clé déjà inscrite ne change jamais de main : même avec la
+		// clé privée, on ne fait pas passer l'appareil d'Alice à Bob, ni
+		// d'une étiquette à une autre. Il faut le retirer d'abord.
+		if existant.Proprietaire != a.Proprietaire || existant.Etiquette != a.Etiquette {
+			return a, ErrAutreProprietaire
+		}
+		a.ID, a.Adresse, a.Cree, a.Nom, a.Signature = existant.ID, existant.Adresse, existant.Cree, existant.Nom, existant.Signature
+		_, err = tx.Exec(`UPDATE appareils SET systeme=?, vu=?, expire=?, jeton=? WHERE id=?`,
+			a.Systeme, now, expire, Empreinte(jeton), a.ID)
 		if err != nil {
 			return a, err
 		}

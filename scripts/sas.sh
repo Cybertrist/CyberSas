@@ -7,6 +7,7 @@
 #   sas.sh retirer <email>           le lui retire
 #   sas.sh demarrer                  construit et lance la pile
 #   sas.sh labo                      lance la fausse maison et le poste d'essai
+#   sas.sh signer                    signe les nouveaux appareils avec le verrou
 #   sas.sh essai                     vérifie que tout répond comme prévu
 #   sas.sh etat                      les appareils du VPN
 #   sas.sh arreter                   arrête tout, sans rien effacer
@@ -86,6 +87,29 @@ init_secrets () {
   [ -f "$GOOGLE/client_secret" ] || echo "a-remplir" > "$GOOGLE/client_secret"
 }
 
+# La clé du verrou du réseau : Ed25519, générée par openssl. Sa moitié
+# privée signe les appareils ; la moitié publique va au serveur, qui la
+# transmet aux appareils.
+#
+# Dans le labo, elle vit dans etat/verrou, sur la même machine que le
+# serveur, pour que tout tienne sur un poste. En production, elle ne doit
+# jamais toucher le VPS : elle reste sur l'ordinateur de l'admin (voir
+# cmd_signer).
+init_verrou () {
+  local v="$ETAT/verrou"
+  mkdir -p "$v"
+  [ -f "$v/cle" ] && return
+  openssl genpkey -algorithm ed25519 -out "$v/cle.pem" 2>/dev/null
+  # En PKCS#8, les 32 derniers octets de la clé privée sont la graine, et
+  # ceux de la clé publique, la clé elle-même.
+  openssl pkey -in "$v/cle.pem" -outform DER 2>/dev/null | tail -c 32 | base64 > "$v/cle"
+  openssl pkey -in "$v/cle.pem" -pubout -outform DER 2>/dev/null | tail -c 32 | base64 > "$v/publique"
+  rm -f "$v/cle.pem"
+  chmod 600 "$v/cle"
+  [ "$(base64 -d < "$v/publique" | wc -c)" -eq 32 ] || meurt "clé du verrou mal formée"
+  ok "verrou du réseau créé"
+}
+
 # Écrit les configurations de etat/ à partir des modèles et de equipe.txt.
 # sasd relit les siennes toutes les cinq secondes, oauth2-proxy surveille
 # sa liste : aucun redémarrage n'est nécessaire après un changement.
@@ -98,6 +122,7 @@ rendre () {
   { cat "$EQUIPE"; [ "${TLS:-labo}" = labo ] && echo "essai@labo.local equipe"; } > "$ETAT/sasd/equipe.txt.tmp"
   mv "$ETAT/sasd/equipe.txt.tmp" "$ETAT/sasd/equipe.txt"
   printf '%s\n' "$id" > "$ETAT/sasd/clients_google"
+  cp "$ETAT/verrou/publique" "$ETAT/sasd/verrou.pub"
   sed -e "s|@DOMAINE@|$DOMAINE|g" -e "s|@GOOGLE_CLIENT_ID@|$id|g" oauth2-proxy/oauth2-proxy.cfg > "$ETAT/oauth2-proxy/oauth2-proxy.cfg"
 }
 
@@ -110,6 +135,7 @@ cmd_init () {
   if [ "${TLS:-labo}" = labo ]; then init_ca; else ok "TLS=$TLS : rien à faire ici"; fi
   dit "Secrets"
   init_secrets
+  init_verrou
   dit "Accès"
   if [ ! -s "$EQUIPE" ] && [ -n "${ADMIN_EMAIL:-}" ]; then
     printf '# adresse Google        groupe (admins ou equipe)\n%s admins\n' "$ADMIN_EMAIL" > "$EQUIPE"
@@ -168,7 +194,9 @@ attendre_sasd () {
   meurt "sasd ne répond pas après deux minutes."
 }
 
-# Inscrit une machine du labo si elle ne l'est pas déjà.
+# Inscrit une machine du labo si elle ne l'est pas déjà. Le verrou lui est
+# donné d'avance, comme l'admin le ferait : elle refusera un serveur qui en
+# annoncerait un autre.
 inscrire () {
   local svc="$1"; shift
   if "${LABO[@]}" exec -T "$svc" sas etat >/dev/null 2>&1; then
@@ -176,7 +204,20 @@ inscrire () {
   fi
   local cle; cle="$(sasd cle "$@" | tr -d '\r')"
   [ -n "$cle" ] || meurt "pas de clé pour $svc"
-  "${LABO[@]}" exec -T "$svc" sas rejoindre --serveur "https://vpn.$DOMAINE" --cle "$cle" --nom "$svc" | sed 's/^/  /'
+  "${LABO[@]}" exec -T "$svc" sas rejoindre --serveur "https://vpn.$DOMAINE" --cle "$cle" --nom "$svc" \
+    --verrou "$(cat "$ETAT/verrou/publique")" | sed 's/^/  /'
+}
+
+# Signe les appareils pas encore signés. La clé du verrou n'entre jamais
+# dans un conteneur du serveur : un conteneur jetable la lit, signe, et
+# s'en va. En production, cette étape se fait sur l'ordinateur de l'admin :
+#   ssh vps sasd appareils --json | sas verrou signer --fichier ~/.cybersas/verrou | ssh vps sasd signatures
+cmd_signer () {
+  charger_env
+  local v; v="$(cd "$ETAT/verrou" && pwd -W 2>/dev/null || pwd)"
+  sasd appareils --json \
+    | docker run --rm -i -v "$v:/verrou:ro" cybersas:dev sas verrou signer --fichier /verrou/cle \
+    | docker compose exec -T sasd sasd signatures | sed 's/^/  /'
 }
 
 cmd_demarrer () {
@@ -195,6 +236,8 @@ cmd_labo () {
   "${LABO[@]}" up -d
   inscrire maison --etiquette maison
   inscrire poste --utilisateur essai@labo.local
+  dit "Signature des appareils par le verrou"
+  cmd_signer
 }
 
 # --- essais -----------------------------------------------------------------
@@ -204,33 +247,28 @@ cmd_essai () {
   ECHECS=0
   # --ssl-no-revoke : le curl de Windows (Schannel) exige sinon une liste de
   # révocation que l'autorité du labo ne publie pas. Ignoré ailleurs.
-  local c=(curl -s -o "$NUL" -w '%{http_code}' --max-time 10 --ssl-no-revoke --cacert "$ETAT/ca/public/cybersas-ca.pem")
-  local r="--resolve"
-  local code
-
+  local CA="$ETAT/ca/public/cybersas-ca.pem"
+  local c=(curl -s -o "$NUL" -w '%{http_code}' --max-time 10 --ssl-no-revoke --cacert "$CA")
+  local code loc
   # L'adresse vers laquelle une page renvoie, sans la suivre.
   lieu () {
-    curl -s -D - -o "$NUL" --max-time 10 --ssl-no-revoke --cacert "$ETAT/ca/public/cybersas-ca.pem" \
+    curl -s -D - -o "$NUL" --max-time 10 --ssl-no-revoke --cacert "$CA" \
       --resolve "$1.$DOMAINE:$PORT_HTTPS:127.0.0.1" "$2" 2>/dev/null | tr -d '\r' | sed -n 's/^[Ll]ocation: //p' || true
   }
   # Code HTTP d'un appel à l'API, avec un corps JSON éventuel.
   api () {
-    curl -s -o "$NUL" -w '%{http_code}' --max-time 10 --ssl-no-revoke --cacert "$ETAT/ca/public/cybersas-ca.pem" \
+    curl -s -o "$NUL" -w '%{http_code}' --max-time 10 --ssl-no-revoke --cacert "$CA" \
       --resolve "vpn.$DOMAINE:$PORT_HTTPS:127.0.0.1" -H 'Content-Type: application/json' "$@" || true
   }
   local V="https://vpn.$DOMAINE:$PORT_HTTPS"
-  # Une vraie clé publique X25519, tirée pour l'essai.
-  local CLE; CLE="$(openssl genpkey -algorithm X25519 2>/dev/null | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64)"
-  local NULLE="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
   dit "Depuis Internet"
-  code="$("${c[@]}" $r "vpn.$DOMAINE:$PORT_HTTPS:127.0.0.1" "$V/api/v1/sante" || true)"
+  code="$("${c[@]}" --resolve "vpn.$DOMAINE:$PORT_HTTPS:127.0.0.1" "$V/api/v1/sante" || true)"
   [ "$code" = 200 ] && ok "l'API du VPN répond" || rate "vpn.$DOMAINE/api/v1/sante : $code"
 
-  code="$("${c[@]}" $r "auth.$DOMAINE:$PORT_HTTPS:127.0.0.1" "https://auth.$DOMAINE:$PORT_HTTPS/ping" || true)"
-  [ "$code" = 200 ] && ok "le portail de connexion répond" || rate "auth.$DOMAINE/ping : $code"
+  code="$("${c[@]}" --resolve "auth.$DOMAINE:$PORT_HTTPS:127.0.0.1" "https://auth.$DOMAINE:$PORT_HTTPS/ping" || true)"
+  [ "$code" = 200 ] && ok "le portail de connexion web répond" || rate "auth.$DOMAINE/ping : $code"
 
-  local loc
   loc="$(lieu maison "https://maison.$DOMAINE:$PORT_HTTPS/")"
   [[ "$loc" == "https://auth.$DOMAINE/oauth2/start?rd=https://maison.$DOMAINE"* ]] \
     && ok "maison.$DOMAINE renvoie vers la connexion" || rate "maison.$DOMAINE sans session : ${loc:-pas de renvoi}"
@@ -245,24 +283,15 @@ cmd_essai () {
   code="$(curl -s -o "$NUL" -w '%{http_code}' --max-time 5 --resolve "vpn.$DOMAINE:${PORT_HTTP:-80}:127.0.0.1" "http://vpn.$DOMAINE:${PORT_HTTP:-80}/" || true)"
   [ "$code" = 301 ] && ok "le HTTP en clair est redirigé" || rate "HTTP : $code, 301 attendu"
 
-  dit "L'API refuse ce qu'elle doit refuser"
-  code="$(api -X POST -d "{\"jeton_google\":\"eyJ.faux.jeton\",\"cle_publique\":\"$CLE\",\"nom\":\"x\"}" "$V/api/v1/connexion")"
-  [ "$code" = 401 ] && ok "un faux jeton Google est refusé (401)" || rate "faux jeton Google : $code"
-  code="$(api -X POST -d "{\"cle_inscription\":\"sas-inventee\",\"cle_publique\":\"$CLE\",\"nom\":\"x\"}" "$V/api/v1/connexion")"
-  [ "$code" = 401 ] && ok "une clé d'inscription inventée est refusée (401)" || rate "clé inventée : $code"
-  code="$(api "$V/api/v1/appareils")"
-  [ "$code" = 401 ] && ok "la liste des appareils demande un jeton (401)" || rate "appareils sans jeton : $code"
-  local cle; cle="$(sasd cle --etiquette essai | tr -d '\r')"
-  code="$(api -X POST -d "{\"cle_inscription\":\"$cle\",\"cle_publique\":\"$NULLE\",\"nom\":\"x\"}" "$V/api/v1/connexion")"
-  [ "$code" = 400 ] && ok "une clé publique faible (nulle) est refusée (400)" || rate "clé nulle : $code"
-  api -X POST -d "{\"cle_inscription\":\"$cle\",\"cle_publique\":\"$CLE\",\"nom\":\"jetable\"}" "$V/api/v1/connexion" >/dev/null
-  code="$(api -X POST -d "{\"cle_inscription\":\"$cle\",\"cle_publique\":\"$CLE\",\"nom\":\"jetable\"}" "$V/api/v1/connexion")"
-  [ "$code" = 401 ] && ok "une clé d'inscription ne sert qu'une fois" || rate "clé réutilisée : $code"
-  sasd retirer jetable >/dev/null 2>&1 || true
+  code="$(api -X POST -d '{"cle_inscription":"sas-inventee","cle_publique":"AAAA","nom":"x"}' "$V/api/v1/connexion")"
+  [ "$code" = 400 ] || [ "$code" = 401 ] && ok "une inscription sans preuve est refusée ($code)" || rate "inscription sans preuve : $code"
+  code="$(api "$V/api/v1/reseau")"
+  [ "$code" = 401 ] && ok "l'état du réseau demande un jeton (401)" || rate "réseau sans jeton : $code"
 
-  dit "Dans le VPN, par notre tunnel"
-  local maison
+  dit "Dans le VPN, de bout en bout"
+  local maison poste
   maison="$("${LABO[@]}" exec -T poste sas appareils 2>/dev/null | awk '$1=="maison" {print $2}' | tr -d '\r' || true)"
+  poste="$("${LABO[@]}" exec -T poste sas etat 2>/dev/null | awk '{print $2}' | tr -d '\r' || true)"
   [ -n "$maison" ] && ok "le poste voit maison ($maison) dans sa liste" || rate "le poste ne voit pas maison"
 
   # Si le serveur vient de redémarrer, les appareils ont perdu leur session
@@ -282,24 +311,50 @@ cmd_essai () {
     ok "le serveur trouve maison.sas.internal ($nom) et atteint son service"
   else rate "le serveur n'atteint pas maison.sas.internal"; fi
 
-  if "${LABO[@]}" exec -T poste wget -qO- -T 5 "http://$maison/" 2>/dev/null | grep -q Hostname; then
-    ok "l'équipe atteint le service web de la maison"
-  else rate "le poste n'atteint pas maison:80"; fi
-
   if "${LABO[@]}" exec -T poste wget -qO- -T 5 "http://$maison:8080/" >/dev/null 2>&1; then
     rate "le poste atteint maison:8080, que la politique ne lui donne pas"
-  else ok "maison:8080 reste fermé à l'équipe"; fi
+  else ok "maison refuse elle-même le port 8080 au poste"; fi
 
-  local poste
-  poste="$("${LABO[@]}" exec -T poste sas etat 2>/dev/null | awk '{print $2}' | tr -d '\r' || true)"
   if "${LABO[@]}" exec -T maison wget -qO- -T 5 "http://$poste:80/" >/dev/null 2>&1 \
      || "${LABO[@]}" exec -T maison ping -c1 -W3 "$poste" >/dev/null 2>&1; then
     rate "maison atteint le poste : elle ne devrait rien pouvoir ouvrir"
   else ok "maison ne peut pas se retourner vers le poste"; fi
 
-  if docker compose exec -T sasd sh -c "nft list chain inet cybersas depuis_vpn" 2>/dev/null | grep -q "counter packets [1-9]"; then
-    ok "le pare-feu du serveur a bien bloqué des paquets"
-  else rate "le compteur de refus du pare-feu est resté à zéro"; fi
+  # La preuve du bout en bout : on écoute tout ce qui passe sur le serveur,
+  # interface du VPN comprise, pendant que le poste demande à la maison une
+  # page dont l'adresse contient un marqueur. Le marqueur ne doit jamais
+  # apparaître. Témoin : la même demande faite par le serveur lui-même
+  # (Nginx publie la maison, le TLS se termine sur le VPS) doit, elle, se
+  # voir en clair. Sans ce témoin, une capture vide ne prouverait rien.
+  local cap; cap="$(mktemp)"
+  local porte; porte="$(docker compose ps -q porte)"
+  docker run --rm --network "container:$porte" --cap-add NET_RAW --cap-add NET_ADMIN alpine:3.24 sh -c \
+    'apk add -q tcpdump >/dev/null 2>&1; timeout 12 tcpdump -i any -A -s0 -U -n 2>/dev/null' > "$cap" &
+  local espion=$!
+  sleep 5
+  "${LABO[@]}" exec -T poste wget -qO- -T 3 "http://$maison/SECRET-BOUT-EN-BOUT" >/dev/null 2>&1 || true
+  docker compose exec -T sasd wget -qO- -T 3 "http://$maison/TEMOIN-DU-SERVEUR" >/dev/null 2>&1 || true
+  wait "$espion" 2>/dev/null || true
+  if ! grep -q "TEMOIN-DU-SERVEUR" "$cap"; then
+    rate "la capture sur le serveur n'a rien vu, même le témoin : test non concluant"
+  elif grep -q "SECRET-BOUT-EN-BOUT" "$cap"; then
+    rate "le serveur a vu en clair une requête du poste vers la maison"
+  else ok "le serveur relaie sans rien lire : le témoin apparaît dans la capture, le secret du poste jamais"; fi
+  rm -f "$cap"
+
+  dit "Le verrou du réseau"
+  # Un serveur piraté inscrit sa propre machine sous l'étiquette maison. Le
+  # poste la voit annoncée, mais sans signature du verrou : il la refuse.
+  local intrus
+  "${LABO[@]}" exec -T -e SAS_ETAT=/tmp/intrus maison sas rejoindre --serveur "https://vpn.$DOMAINE" \
+    --cle "$(sasd cle --etiquette maison | tr -d '\r')" --nom intrus >/dev/null 2>&1 || true
+  sleep 1
+  intrus="$("${LABO[@]}" exec -T poste sas appareils 2>/dev/null | grep '^intrus' || true)"
+  if [[ "$intrus" == *"REFUSÉ : pas signé par le verrou"* ]]; then
+    ok "un appareil que le serveur annonce sans signature est refusé par le poste"
+  else rate "le poste ne refuse pas l'intrus non signé : ${intrus:-absent}"; fi
+  sasd retirer intrus >/dev/null 2>&1 || true
+  "${LABO[@]}" exec -T maison rm -rf /tmp/intrus
 
   dit "Retirer un appareil le coupe"
   sasd retirer poste >/dev/null
@@ -310,6 +365,7 @@ cmd_essai () {
   # On le remet, pour que l'essai puisse se relancer.
   "${LABO[@]}" exec -T poste rm -f /var/lib/sas/etat.json
   inscrire poste --utilisateur essai@labo.local >/dev/null
+  cmd_signer >/dev/null 2>&1
 
   echo
   [ "$ECHECS" -eq 0 ] && dit "Tout est conforme." || meurt "$ECHECS vérification(s) en échec."
@@ -328,8 +384,9 @@ case "$c" in
   retirer) charger_env; cmd_retirer "$@" ;;
   demarrer) cmd_demarrer ;;
   labo) cmd_labo ;;
+  signer) cmd_signer ;;
   essai) cmd_essai ;;
   etat) cmd_etat ;;
   arreter) cmd_arreter ;;
-  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

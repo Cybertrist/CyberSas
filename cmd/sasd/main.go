@@ -3,7 +3,8 @@
 //	sasd                               fait tourner le serveur
 //	sasd cle --etiquette maison        clé d'inscription pour une machine
 //	sasd cle --utilisateur a@b.fr      clé pour l'appareil d'une personne, sans Google
-//	sasd appareils                     les appareils inscrits
+//	sasd appareils [--json]            les appareils inscrits
+//	sasd signatures < signatures.json  importe les signatures du verrou
 //	sasd retirer <nom>                 coupe un appareil
 //
 // La configuration vient de l'environnement, voir config().
@@ -13,6 +14,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -23,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -30,9 +33,11 @@ import (
 	"github.com/Cybertrist/CyberSas/internal/base"
 	"github.com/Cybertrist/CyberSas/internal/dns"
 	"github.com/Cybertrist/CyberSas/internal/noise"
+	"github.com/Cybertrist/CyberSas/internal/protocole"
 	"github.com/Cybertrist/CyberSas/internal/serveur"
 	"github.com/Cybertrist/CyberSas/internal/tun"
 	"github.com/Cybertrist/CyberSas/internal/tunnel"
+	"github.com/Cybertrist/CyberSas/internal/verrou"
 )
 
 func env(nom, defaut string) string {
@@ -63,6 +68,7 @@ func config() reglages {
 			Equipe:        env("SAS_EQUIPE", "/config/equipe.txt"),
 			Politique:     env("SAS_POLITIQUE", "/config/politique.json"),
 			ClientsGoogle: env("SAS_CLIENTS_GOOGLE", "/config/clients_google"),
+			Verrou:        env("SAS_VERROU", "/config/verrou.pub"),
 			DureeAppareil: 30 * 24 * time.Hour,
 		},
 		etat:   env("SAS_ETAT", "/var/lib/sasd"),
@@ -87,7 +93,9 @@ func main() {
 		case "cle":
 			cmdCle(b, os.Args[2:])
 		case "appareils":
-			cmdAppareils(b)
+			cmdAppareils(b, os.Args[2:])
+		case "signatures":
+			cmdSignatures(b, cfg)
 		case "retirer":
 			if len(os.Args) != 3 {
 				meurt("usage : sasd retirer <nom>")
@@ -124,17 +132,63 @@ func cmdCle(b *base.Base, args []string) {
 	fmt.Println(cle)
 }
 
-func cmdAppareils(b *base.Base) {
+func cmdAppareils(b *base.Base, args []string) {
+	f := flag.NewFlagSet("appareils", flag.ExitOnError)
+	enJSON := f.Bool("json", false, "sortie JSON, pour sas verrou signer")
+	f.Parse(args)
 	liste, err := b.Appareils()
 	if err != nil {
 		meurt("%v", err)
 	}
+	if *enJSON {
+		var r []protocole.Appareil
+		for _, a := range liste {
+			p := protocole.Appareil{Numero: uint32(a.ID), Nom: a.Nom, Adresse: a.Adresse.String(), ClePublique: a.ClePublique,
+				Proprietaire: a.Proprietaire, Etiquette: a.Etiquette, Systeme: a.Systeme}
+			if len(a.Signature) > 0 {
+				p.Signature = base64.StdEncoding.EncodeToString(a.Signature)
+			}
+			r = append(r, p)
+		}
+		json.NewEncoder(os.Stdout).Encode(r)
+		return
+	}
 	t := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(t, "NOM\tADRESSE\tPROPRIÉTAIRE\tÉTIQUETTE\tSYSTÈME\tVU LE")
+	fmt.Fprintln(t, "NOM\tADRESSE\tPROPRIÉTAIRE\tÉTIQUETTE\tSYSTÈME\tSIGNÉ\tVU LE")
 	for _, a := range liste {
-		fmt.Fprintf(t, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Nom, a.Adresse, tiret(a.Proprietaire), tiret(a.Etiquette), tiret(a.Systeme), a.Vu.Format("02/01 15:04"))
+		signe := "non"
+		if len(a.Signature) > 0 {
+			signe = "oui"
+		}
+		fmt.Fprintf(t, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Nom, a.Adresse, tiret(a.Proprietaire), tiret(a.Etiquette), tiret(a.Systeme), signe, a.Vu.Format("02/01 15:04"))
 	}
 	t.Flush()
+}
+
+// cmdSignatures lit sur l'entrée les signatures produites par
+// « sas verrou signer », les vérifie avec la clé publique du verrou, et
+// enregistre celles qui tiennent.
+func cmdSignatures(b *base.Base, cfg reglages) {
+	texte, err := os.ReadFile(cfg.Verrou)
+	if err != nil {
+		meurt("pas de verrou configuré (%s)", cfg.Verrou)
+	}
+	cle, err := verrou.LirePublique(strings.TrimSpace(string(texte)))
+	if err != nil {
+		meurt("%v", err)
+	}
+	var liste []protocole.Appareil
+	if err := json.NewDecoder(os.Stdin).Decode(&liste); err != nil {
+		meurt("entrée illisible : %v", err)
+	}
+	ok, refus := serveur.ImporterSignatures(b, cle, liste)
+	fmt.Printf("%d signature(s) enregistrée(s)\n", ok)
+	for _, n := range refus {
+		fmt.Printf("refusée : %s (signature fausse, ou clé et adresse qui ne correspondent plus)\n", n)
+	}
+	if len(refus) > 0 {
+		os.Exit(1)
+	}
 }
 
 func tiret(s string) string {
@@ -193,25 +247,31 @@ func servir(cfg reglages) error {
 	ctx, arret := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer arret()
 
-	moteur := tunnel.Nouveau(prive, iface, conn, journal.With("composant", "tunnel"))
+	// Le moteur demande au serveur, pour chaque trame, si les deux
+	// appareils ont le droit de se parler. Le serveur est créé juste après,
+	// avant que le moteur ne tourne.
+	var srv *serveur.Serveur
+	moteur := tunnel.Nouveau(tunnel.Config{Prive: prive, Tun: iface, Conn: conn,
+		Journal: journal.With("composant", "tunnel"),
+		Relais:  func(de, vers uint32) bool { return srv.Relie(de, vers) }})
+
+	resolveur := dns.Nouveau("sas.internal", env("SAS_DNS_AMONT", "1.1.1.1:53"))
+	srv = serveur.Nouveau(cfg.Config, b, moteur, resolveur, prive, journal)
+	if err := srv.Synchroniser(); err != nil {
+		return err
+	}
+
 	go func() {
 		if err := moteur.Lancer(ctx); err != nil {
 			journal.Error("tunnel arrêté", "erreur", err)
 			arret()
 		}
 	}()
-
-	resolveur := dns.Nouveau("sas.internal", env("SAS_DNS_AMONT", "1.1.1.1:53"))
 	go func() {
 		if err := resolveur.Lancer(net.JoinHostPort(cfg.Serveur.String(), "53")); err != nil {
 			journal.Error("DNS arrêté", "erreur", err)
 		}
 	}()
-
-	srv := serveur.Nouveau(cfg.Config, b, moteur, resolveur, prive.PublicKey().Bytes(), journal)
-	if err := srv.Synchroniser(); err != nil {
-		return err
-	}
 	go srv.Boucle(ctx)
 
 	api := &http.Server{Addr: cfg.ecoute, Handler: srv.Routes(), ReadHeaderTimeout: 10 * time.Second}

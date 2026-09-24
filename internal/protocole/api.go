@@ -1,20 +1,25 @@
-// Package protocole décrit ce que l'appli et le serveur s'échangent sur
-// l'API HTTPS : se connecter, lister les appareils, se déconnecter.
+// Package protocole décrit ce que les applis et le serveur s'échangent sur
+// l'API HTTPS : s'inscrire, connaître le réseau, se déconnecter.
 //
 // L'API ne transporte jamais de clé privée. L'appareil génère sa paire de
-// clés lui-même et n'envoie que la moitié publique.
+// clés lui-même et n'envoie que la moitié publique. Et rien de ce qu'elle
+// dit n'est cru sans vérification quand le verrou du réseau est en place :
+// chaque clé d'appareil doit porter la signature de l'admin.
 package protocole
 
 import "time"
 
 const (
 	CheminConnexion   = "/api/v1/connexion"
-	CheminAppareils   = "/api/v1/appareils"
+	CheminReseau      = "/api/v1/reseau"
 	CheminDeconnexion = "/api/v1/deconnexion"
 	CheminSante       = "/api/v1/sante"
+	// CheminServeur rend la clé publique du serveur, pour calculer la
+	// preuve de possession avant de s'inscrire.
+	CheminServeur = "/api/v1/serveur"
 )
 
-// DemandeConnexion : l'une des deux preuves, jamais les deux. Un jeton
+// DemandeConnexion : l'un des deux justificatifs, jamais les deux. Un jeton
 // Google pour une personne, une clé d'inscription pour une machine.
 type DemandeConnexion struct {
 	JetonGoogle    string `json:"jeton_google,omitempty"`
@@ -22,11 +27,16 @@ type DemandeConnexion struct {
 	ClePublique    string `json:"cle_publique"`
 	Nom            string `json:"nom"`
 	Systeme        string `json:"systeme"`
+	// Horodatage (secondes Unix) et Preuve : la preuve que l'appareil détient
+	// la clé privée qui va avec ClePublique. Voir Prouver.
+	Horodatage int64  `json:"horodatage"`
+	Preuve     string `json:"preuve"`
 }
 
 type Serveur struct {
 	ClePublique string `json:"cle_publique"`
-	Point       string `json:"point"` // hôte:port UDP du tunnel
+	Point       string `json:"point"`   // hôte:port UDP du tunnel
+	Adresse     string `json:"adresse"` // son adresse dans le VPN, 10.77.0.1
 }
 
 type ReponseConnexion struct {
@@ -35,20 +45,47 @@ type ReponseConnexion struct {
 	DNS      string   `json:"dns"`     // le résolveur du VPN
 	Domaine  string   `json:"domaine"` // sas.internal
 	Serveur  Serveur  `json:"serveur"`
+	// Verrou : clé publique Ed25519 du verrou du réseau, si l'admin en a
+	// mis un. L'appareil la retient et ne la laisse plus changer.
+	Verrou string `json:"verrou,omitempty"`
 	// Jeton : à présenter ensuite à l'API. Il n'ouvre pas le tunnel, qui ne
 	// se fie qu'aux clés.
 	Jeton string `json:"jeton"`
 }
 
 type Appareil struct {
+	Numero       uint32    `json:"numero"`
 	Nom          string    `json:"nom"`
 	Adresse      string    `json:"adresse"`
+	ClePublique  string    `json:"cle_publique,omitempty"`
+	Signature    string    `json:"signature,omitempty"` // du verrou, sur clé + adresse
 	Proprietaire string    `json:"proprietaire,omitempty"`
 	Etiquette    string    `json:"etiquette,omitempty"`
 	Systeme      string    `json:"systeme,omitempty"`
 	EnLigne      bool      `json:"en_ligne"`
 	Moi          bool      `json:"moi,omitempty"`
 	Expire       time.Time `json:"expire,omitzero"`
+}
+
+// RegleEntrante : ce que ces sources ont le droit d'ouvrir chez l'appareil
+// qui la reçoit. Ports : "*", "icmp", "tcp:443", "udp:53", "tcp:8000-8100".
+type RegleEntrante struct {
+	Sources []string `json:"sources"`
+	Ports   []string `json:"ports"`
+}
+
+// EtatReseau : tout ce qu'un appareil doit savoir pour configurer son
+// tunnel. Il le redemande régulièrement.
+type EtatReseau struct {
+	Moi     Appareil `json:"moi"`
+	Serveur Serveur  `json:"serveur"`
+	Verrou  string   `json:"verrou,omitempty"`
+	// Pairs : les appareils avec qui une session de bout en bout est
+	// permise, dans un sens ou dans l'autre.
+	Pairs []Appareil `json:"pairs"`
+	// Entrant : ce que chacun peut ouvrir chez moi. Le reste est refusé,
+	// sauf les réponses à ce que j'ai ouvert.
+	Entrant []RegleEntrante `json:"entrant"`
 }
 
 type Erreur struct {

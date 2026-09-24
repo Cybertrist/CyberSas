@@ -56,23 +56,53 @@ func TestJoignables(t *testing.T) {
 func TestNft(t *testing.T) {
 	r := Nft(pol.Compiler(equipe, apps, serveur), "sas0", serveur)
 	for _, attendu := range []string{
-		`ip saddr { 10.77.0.3, 10.77.0.4 } ip daddr { 10.77.0.2 } tcp dport 80 accept`,
 		`ip saddr { 10.77.0.1 } ip daddr { 10.77.0.2 } tcp dport 80 accept`,
-		`oifname != "sas0" counter drop`,
+		`iifname "sas0" counter drop comment "aucun paquet ne traverse le serveur en clair"`,
 		"delete table inet cybersas",
 	} {
 		if !strings.Contains(r, attendu) {
 			t.Errorf("règle manquante : %s\n%s", attendu, r)
 		}
 	}
+	// Entre appareils, le noyau du serveur ne laisse plus rien passer : la
+	// règle d'alice vers la maison est appliquée par la maison elle-même.
+	if strings.Contains(r, "10.77.0.3, 10.77.0.4") {
+		t.Error("une règle de transit entre appareils est restée dans le noyau du serveur")
+	}
 	if strings.Contains(r, "10.77.0.6") {
 		t.Error("bob n'est plus dans l'équipe, il ne doit apparaître dans aucune règle")
 	}
 }
 
+func TestRelationsEtEntrant(t *testing.T) {
+	flux := pol.Compiler(equipe, apps, serveur)
+	rel := Relations(flux, serveur)
+	if !rel[[2]netip.Addr{a("10.77.0.3"), a("10.77.0.2")}] || !rel[[2]netip.Addr{a("10.77.0.2"), a("10.77.0.3")}] {
+		t.Error("alice et la maison doivent être reliées, dans les deux sens")
+	}
+	if rel[[2]netip.Addr{a("10.77.0.2"), a("10.77.0.6")}] {
+		t.Error("bob est sorti : aucune relation")
+	}
+	// Chez la maison : alice (ses deux appareils) en TCP 80 et 443, l'admin
+	// en tout, le serveur en TCP 80.
+	entrees := map[netip.Addr]string{}
+	for _, e := range Entrant(flux, a("10.77.0.2")) {
+		var s []string
+		for _, p := range e.Ports {
+			s = append(s, p.String())
+		}
+		entrees[e.Source] = strings.Join(s, ",")
+	}
+	for src, attendu := range map[string]string{"10.77.0.3": "tcp:80,tcp:443", "10.77.0.5": "*", "10.77.0.1": "tcp:80"} {
+		if entrees[a(src)] != attendu {
+			t.Errorf("entrant de %s chez la maison : %q, attendu %q", src, entrees[a(src)], attendu)
+		}
+	}
+}
+
 func TestPortsIllisibles(t *testing.T) {
 	for _, p := range []string{"tcp", "tcp:abc", "tcp:90-80", "ssh"} {
-		if _, err := lirePorts([]string{p}); err == nil {
+		if _, err := LirePorts([]string{p}); err == nil {
 			t.Errorf("%q aurait dû être refusé", p)
 		}
 	}

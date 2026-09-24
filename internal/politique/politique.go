@@ -70,7 +70,7 @@ func Charger(chemin string) (Politique, error) {
 		return p, fmt.Errorf("%s : %w", chemin, err)
 	}
 	for i, r := range p.Regles {
-		if _, err := lirePorts(r.Ports); err != nil {
+		if _, err := LirePorts(r.Ports); err != nil {
 			return p, fmt.Errorf("%s, règle %d : %w", chemin, i+1, err)
 		}
 	}
@@ -95,7 +95,7 @@ func ChargerEquipe(chemin string) (Equipe, error) {
 	return e, s.Err()
 }
 
-func lirePorts(liste []string) ([]Port, error) {
+func LirePorts(liste []string) ([]Port, error) {
 	var r []Port
 	for _, s := range liste {
 		switch {
@@ -163,7 +163,7 @@ func choisir(sels []string, apps []Appareil, e Equipe, serveur netip.Addr) []net
 func (p Politique) Compiler(e Equipe, apps []Appareil, serveur netip.Addr) []Flux {
 	var flux []Flux
 	for _, r := range p.Regles {
-		ports, _ := lirePorts(r.Ports)
+		ports, _ := LirePorts(r.Ports)
 		sources := choisir(r.De, apps, e, serveur)
 		if len(sources) == 0 {
 			continue
@@ -208,6 +208,68 @@ func Joignables(flux []Flux, depuis netip.Addr) map[netip.Addr]bool {
 				}
 			}
 		}
+	}
+	return r
+}
+
+// String rend un port sous la forme qu'accepte LirePorts.
+func (p Port) String() string {
+	switch {
+	case p.Proto == "*" || p.Proto == "icmp":
+		return p.Proto
+	case p.Debut == p.Fin:
+		return fmt.Sprintf("%s:%d", p.Proto, p.Debut)
+	}
+	return fmt.Sprintf("%s:%d-%d", p.Proto, p.Debut, p.Fin)
+}
+
+// Relations : les paires d'adresses qui ont le droit d'échanger, dans un
+// sens au moins. Le serveur ne relaie qu'entre elles : deux appareils sans
+// relation ne peuvent même pas se faire une poignée de main.
+func Relations(flux []Flux, serveur netip.Addr) map[[2]netip.Addr]bool {
+	r := map[[2]netip.Addr]bool{}
+	for _, f := range flux {
+		for _, s := range f.Sources {
+			for _, d := range f.Dest {
+				if s != d && s != serveur && d != serveur {
+					r[[2]netip.Addr{s, d}] = true
+					r[[2]netip.Addr{d, s}] = true
+				}
+			}
+		}
+	}
+	return r
+}
+
+// Entree : ce qu'une source peut ouvrir chez un appareil.
+type Entree struct {
+	Source netip.Addr
+	Ports  []Port
+}
+
+// Entrant : pour un appareil, ce que chaque source a le droit d'ouvrir
+// chez lui. C'est ce que son moteur appliquera, puisque le serveur ne voit
+// plus ce qui passe entre appareils.
+func Entrant(flux []Flux, moi netip.Addr) []Entree {
+	parSource := map[netip.Addr][]Port{}
+	var ordre []netip.Addr
+	for _, f := range flux {
+		if !slices.Contains(f.Dest, moi) {
+			continue
+		}
+		for _, s := range f.Sources {
+			if s == moi {
+				continue
+			}
+			if _, vu := parSource[s]; !vu {
+				ordre = append(ordre, s)
+			}
+			parSource[s] = append(parSource[s], f.Ports...)
+		}
+	}
+	r := make([]Entree, 0, len(ordre))
+	for _, s := range ordre {
+		r = append(r, Entree{s, parSource[s]})
 	}
 	return r
 }

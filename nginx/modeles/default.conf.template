@@ -4,7 +4,7 @@
 # répondrait sinon à n'importe quel nom d'hôte.
 
 # Les noms Docker se résolvent à la requête, pas au démarrage : Nginx
-# démarre même si Headscale ou oauth2-proxy ne sont pas encore prêts.
+# démarre même si sasd ou oauth2-proxy ne sont pas encore prêts.
 resolver 127.0.0.11 valid=10s ipv6=off;
 
 server_tokens off;
@@ -35,12 +35,10 @@ server {
     return 444;
 }
 
-# En clair, on ne fait que rediriger. /generate_204 sert aux clients
-# Tailscale à détecter un portail captif.
+# En clair, on ne fait que rediriger.
 server {
     listen 80;
     server_name ${DOMAINE} *.${DOMAINE};
 
-    location = /generate_204 { return 204; }
     location / { return 301 https://$host$request_uri; }
 }

@@ -5,7 +5,7 @@
 #   sas.sh google <id> <secret>      le client OAuth créé dans Google Cloud
 #   sas.sh membre <email> <groupe>   donne l'accès à un compte Google (admins ou equipe)
 #   sas.sh retirer <email>           le lui retire
-#   sas.sh demarrer                  lance la pile et inscrit le relais au VPN
+#   sas.sh demarrer                  construit et lance la pile
 #   sas.sh labo                      lance la fausse maison et le poste d'essai
 #   sas.sh essai                     vérifie que tout répond comme prévu
 #   sas.sh etat                      les appareils du VPN
@@ -42,11 +42,6 @@ charger_env () {
   PORT_HTTPS="${PORT_HTTPS:-443}"
 }
 
-# Champ d'un objet JSON sur une ligne, sans jq : assez pour lire ce que
-# rendent headscale et tailscale.
-champ () { grep -o "\"$1\": *\"\?[^\",}]*" | head -1 | sed 's/.*: *"\{0,1\}//'; }
-
-hs () { docker compose exec -T headscale headscale "$@"; }
 en_route () { docker compose ps --status running --services 2>/dev/null | grep -qx "$1"; }
 
 # --- init -------------------------------------------------------------------
@@ -92,39 +87,21 @@ init_secrets () {
 }
 
 # Écrit les configurations de etat/ à partir des modèles et de equipe.txt.
+# sasd relit les siennes toutes les cinq secondes, oauth2-proxy surveille
+# sa liste : aucun redémarrage n'est nécessaire après un changement.
 rendre () {
-  mkdir -p "$ETAT/headscale" "$ETAT/oauth2-proxy"
+  mkdir -p "$ETAT/sasd" "$ETAT/oauth2-proxy"
   touch "$EQUIPE"
   local id; id="$(cat "$GOOGLE/client_id")"
-  local mails admins equipe
-  mails="$(awk 'NF>=2 && $1 !~ /^#/ {print $1}' "$EQUIPE")"
-  # Dans la politique, une adresse email désigne son propriétaire.
-  admins="$(awk 'NF>=2 && $2=="admins" {printf "%s\"%s\"", (n++?", ":""), $1}' "$EQUIPE")"
-  equipe="$(awk 'NF>=2 && $2=="equipe" {printf "%s\"%s\"", (n++?", ":""), $1}' "$EQUIPE")"
-  # Le poste d'essai du labo est un utilisateur local, sans compte Google.
-  if [ "${TLS:-labo}" = labo ]; then equipe="${equipe:+$equipe, }\"essai@\""; fi
-
-  printf '%s\n' "$mails" > "$ETAT/oauth2-proxy/emails.txt"
-  local liste; liste="$(printf '%s\n' "$mails" | awk 'NF {print "    - \"" $1 "\""}')"
-  [ -n "$liste" ] || liste='    - "personne@invalid"'
-  awk -v d="$DOMAINE" -v i="$id" -v l="$liste" '
-    $0 == "@UTILISATEURS@" { print l; next }
-    { gsub(/@DOMAINE@/, d); gsub(/@GOOGLE_CLIENT_ID@/, i); print }' \
-    headscale/config.yaml > "$ETAT/headscale/config.yaml"
-  sed -e "s|@ADMINS@|$admins|" -e "s|@EQUIPE@|$equipe|" headscale/politique.hujson > "$ETAT/headscale/politique.hujson"
+  awk 'NF>=2 && $1 !~ /^#/ {print $1}' "$EQUIPE" > "$ETAT/oauth2-proxy/emails.txt"
+  # Le poste d'essai du labo s'inscrit avec une clé, sans compte Google.
+  { cat "$EQUIPE"; [ "${TLS:-labo}" = labo ] && echo "essai@labo.local equipe"; } > "$ETAT/sasd/equipe.txt.tmp"
+  mv "$ETAT/sasd/equipe.txt.tmp" "$ETAT/sasd/equipe.txt"
+  printf '%s\n' "$id" > "$ETAT/sasd/clients_google"
   sed -e "s|@DOMAINE@|$DOMAINE|g" -e "s|@GOOGLE_CLIENT_ID@|$id|g" oauth2-proxy/oauth2-proxy.cfg > "$ETAT/oauth2-proxy/oauth2-proxy.cfg"
 }
 
-# Après un changement d'accès : Headscale relit sa liste au démarrage,
-# oauth2-proxy surveille la sienne.
-appliquer () {
-  rendre
-  ok "configurations réécrites"
-  if en_route headscale; then
-    docker compose restart headscale oauth2-proxy >/dev/null 2>&1
-    ok "Headscale et oauth2-proxy relancés"
-  fi
-}
+sasd () { docker compose exec -T sasd sasd "$@"; }
 
 cmd_init () {
   charger_env
@@ -140,7 +117,7 @@ cmd_init () {
   fi
   rendre
   ok "configurations écrites dans etat/"
-  dit "Prêt. Suite : bash scripts/sas.sh google <id> <secret>, puis demarrer"
+  dit "Prêt. Suite : bash scripts/sas.sh demarrer"
 }
 
 # --- Google et accès ----------------------------------------------------------
@@ -151,8 +128,10 @@ cmd_google () {
   mkdir -p "$GOOGLE"
   printf '%s\n' "$1" > "$GOOGLE/client_id"
   printf '%s\n' "$2" > "$GOOGLE/client_secret"
+  rendre
   ok "client Google enregistré"
-  appliquer
+  # oauth2-proxy ne relit son identifiant qu'au démarrage.
+  en_route oauth2-proxy && docker compose restart oauth2-proxy >/dev/null 2>&1 && ok "oauth2-proxy relancé" || true
 }
 
 cmd_membre () {
@@ -163,8 +142,8 @@ cmd_membre () {
   touch "$EQUIPE"
   awk -v m="$mail" '$1 != m' "$EQUIPE" > "$EQUIPE.tmp" && mv "$EQUIPE.tmp" "$EQUIPE"
   printf '%s %s\n' "$mail" "$groupe" >> "$EQUIPE"
-  ok "$mail : $groupe"
-  appliquer
+  rendre
+  ok "$mail : $groupe, pris en compte d'ici cinq secondes"
 }
 
 cmd_retirer () {
@@ -172,74 +151,50 @@ cmd_retirer () {
   local mail="${1,,}"
   grep -q "^$mail " "$EQUIPE" 2>/dev/null || meurt "$mail n'est pas dans l'équipe"
   awk -v m="$mail" '$1 != m' "$EQUIPE" > "$EQUIPE.tmp" && mv "$EQUIPE.tmp" "$EQUIPE"
-  ok "$mail retiré"
-  appliquer
-  # Ses appareils déjà connectés restent inscrits : on les expire.
-  if en_route headscale; then
-    local ids
-    ids="$(hs nodes list -o json 2>/dev/null | tr -d '\n' | sed 's/},{"id"/}\n{"id"/g' | grep -i "\"$mail\"" | grep -o '^{"id": *[0-9]*' | grep -o '[0-9]*$' || true)"
-    for i in $ids; do hs nodes expire -i "$i" >/dev/null && ok "appareil $i déconnecté"; done
-  fi
+  rendre
+  # sasd purge lui-même les appareils d'une personne sortie de l'équipe.
+  ok "$mail retiré : ses appareils sont coupés d'ici cinq secondes"
 }
 
 # --- démarrage ---------------------------------------------------------------
 
-attendre_headscale () {
+attendre_sasd () {
   local i
   for i in $(seq 1 60); do
-    hs health >/dev/null 2>&1 && return 0
+    docker compose exec -T sasd wget -qO- http://127.0.0.1:8080/api/v1/sante >/dev/null 2>&1 && return 0
     sleep 2
   done
-  docker compose logs --tail 30 headscale oauth2-proxy nginx
-  meurt "Headscale ne répond pas après deux minutes."
+  docker compose logs --tail 30 sasd nginx
+  meurt "sasd ne répond pas après deux minutes."
 }
 
-# Inscrit un nœud s'il ne l'est pas déjà. $1 : commande compose, $2 : service,
-# $3 : clé d'inscription.
+# Inscrit une machine du labo si elle ne l'est pas déjà.
 inscrire () {
-  local -n compose=$1
-  local svc="$2"
-  if "${compose[@]}" exec -T "$svc" tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"'; then
+  local svc="$1"; shift
+  if "${LABO[@]}" exec -T "$svc" sas etat >/dev/null 2>&1; then
     ok "$svc déjà dans le VPN"; return
   fi
-  local cle; cle="$($3)"
+  local cle; cle="$(sasd cle "$@" | tr -d '\r')"
   [ -n "$cle" ] || meurt "pas de clé pour $svc"
-  # --accept-dns=false : le conteneur garde le DNS de Docker, sans quoi il
-  # ne trouverait plus hs.DOMAINE. Le résolveur du VPN reste joignable
-  # à 100.100.100.100.
-  "${compose[@]}" exec -T "$svc" tailscale up --login-server="https://hs.$DOMAINE" \
-    --authkey="$cle" --hostname="$svc" --accept-dns=false --timeout=60s
-  ok "$svc inscrit"
-}
-
-cle_etiquette () { hs preauthkeys create --tags "$1" --expiration 10m -o json | champ key; }
-cle_relais () { cle_etiquette tag:relais; }
-cle_maison () { cle_etiquette tag:maison; }
-cle_poste () {
-  hs users create essai >/dev/null 2>&1 || true
-  local id
-  id="$(hs users list -o json | tr -d '\n' | sed 's/},/}\n/g' | grep '"name": *"essai"' | champ id)"
-  hs preauthkeys create --user "$id" --expiration 10m -o json | champ key
+  "${LABO[@]}" exec -T "$svc" sas rejoindre --serveur "https://vpn.$DOMAINE" --cle "$cle" --nom "$svc" | sed 's/^/  /'
 }
 
 cmd_demarrer () {
   charger_env
-  [ -f "$ETAT/headscale/config.yaml" ] || meurt "lancer d'abord : bash scripts/sas.sh init"
-  dit "Démarrage de la pile"
-  docker compose up -d
-  attendre_headscale
-  ok "Headscale répond"
-  local PILE=(docker compose)
-  inscrire PILE relais cle_relais
-  dit "En ligne : https://auth.$DOMAINE  https://hs.$DOMAINE  https://maison.$DOMAINE"
+  [ -f "$ETAT/sasd/equipe.txt" ] || meurt "lancer d'abord : bash scripts/sas.sh init"
+  dit "Construction et démarrage de la pile"
+  docker compose up -d --build
+  attendre_sasd
+  ok "sasd répond"
+  dit "En ligne : https://vpn.$DOMAINE  https://auth.$DOMAINE  https://maison.$DOMAINE"
 }
 
 cmd_labo () {
   charger_env
   dit "Démarrage du labo"
   "${LABO[@]}" up -d
-  inscrire LABO maison cle_maison
-  inscrire LABO poste cle_poste
+  inscrire maison --etiquette maison
+  inscrire poste --utilisateur essai@labo.local
 }
 
 # --- essais -----------------------------------------------------------------
@@ -253,15 +208,24 @@ cmd_essai () {
   local r="--resolve"
   local code
 
-  dit "Depuis Internet"
-  code="$("${c[@]}" $r "hs.$DOMAINE:$PORT_HTTPS:127.0.0.1" "https://hs.$DOMAINE:$PORT_HTTPS/health" || true)"
-  [ "$code" = 200 ] && ok "hs.$DOMAINE/health répond 200" || rate "hs.$DOMAINE/health : $code"
-
   # L'adresse vers laquelle une page renvoie, sans la suivre.
   lieu () {
     curl -s -D - -o "$NUL" --max-time 10 --ssl-no-revoke --cacert "$ETAT/ca/public/cybersas-ca.pem" \
       --resolve "$1.$DOMAINE:$PORT_HTTPS:127.0.0.1" "$2" 2>/dev/null | tr -d '\r' | sed -n 's/^[Ll]ocation: //p' || true
   }
+  # Code HTTP d'un appel à l'API, avec un corps JSON éventuel.
+  api () {
+    curl -s -o "$NUL" -w '%{http_code}' --max-time 10 --ssl-no-revoke --cacert "$ETAT/ca/public/cybersas-ca.pem" \
+      --resolve "vpn.$DOMAINE:$PORT_HTTPS:127.0.0.1" -H 'Content-Type: application/json' "$@" || true
+  }
+  local V="https://vpn.$DOMAINE:$PORT_HTTPS"
+  # Une vraie clé publique X25519, tirée pour l'essai.
+  local CLE; CLE="$(openssl genpkey -algorithm X25519 2>/dev/null | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64)"
+  local NULLE="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+  dit "Depuis Internet"
+  code="$("${c[@]}" $r "vpn.$DOMAINE:$PORT_HTTPS:127.0.0.1" "$V/api/v1/sante" || true)"
+  [ "$code" = 200 ] && ok "l'API du VPN répond" || rate "vpn.$DOMAINE/api/v1/sante : $code"
 
   code="$("${c[@]}" $r "auth.$DOMAINE:$PORT_HTTPS:127.0.0.1" "https://auth.$DOMAINE:$PORT_HTTPS/ping" || true)"
   [ "$code" = 200 ] && ok "le portail de connexion répond" || rate "auth.$DOMAINE/ping : $code"
@@ -273,57 +237,79 @@ cmd_essai () {
 
   loc="$(lieu auth "https://auth.$DOMAINE:$PORT_HTTPS/oauth2/start?rd=https://maison.$DOMAINE/")"
   [[ "$loc" == "https://accounts.google.com/"*"code_challenge_method=S256"* ]] \
-    && ok "la connexion part chez Google, avec PKCE" || rate "auth.$DOMAINE/oauth2/start : ${loc:-pas de renvoi}"
+    && ok "la connexion web part chez Google, avec PKCE" || rate "auth.$DOMAINE/oauth2/start : ${loc:-pas de renvoi}"
 
   code="$(curl -sk -o "$NUL" -w '%{http_code}' --max-time 5 --resolve "inconnu.test:$PORT_HTTPS:127.0.0.1" "https://inconnu.test:$PORT_HTTPS/" || true)"
   [ "$code" = 000 ] && ok "un nom inconnu n'obtient même pas de certificat" || rate "nom inconnu : $code, coupure attendue"
 
-  code="$(curl -s -o "$NUL" -w '%{http_code}' --max-time 5 --resolve "hs.$DOMAINE:${PORT_HTTP:-80}:127.0.0.1" "http://hs.$DOMAINE:${PORT_HTTP:-80}/" || true)"
+  code="$(curl -s -o "$NUL" -w '%{http_code}' --max-time 5 --resolve "vpn.$DOMAINE:${PORT_HTTP:-80}:127.0.0.1" "http://vpn.$DOMAINE:${PORT_HTTP:-80}/" || true)"
   [ "$code" = 301 ] && ok "le HTTP en clair est redirigé" || rate "HTTP : $code, 301 attendu"
 
-  dit "Dans le VPN"
-  local maison
-  maison="$("${LABO[@]}" exec -T poste tailscale ip -4 maison 2>/dev/null | tr -d '\r' || true)"
-  [ -n "$maison" ] && ok "le poste voit maison ($maison)" || rate "le poste ne trouve pas maison"
+  dit "L'API refuse ce qu'elle doit refuser"
+  code="$(api -X POST -d "{\"jeton_google\":\"eyJ.faux.jeton\",\"cle_publique\":\"$CLE\",\"nom\":\"x\"}" "$V/api/v1/connexion")"
+  [ "$code" = 401 ] && ok "un faux jeton Google est refusé (401)" || rate "faux jeton Google : $code"
+  code="$(api -X POST -d "{\"cle_inscription\":\"sas-inventee\",\"cle_publique\":\"$CLE\",\"nom\":\"x\"}" "$V/api/v1/connexion")"
+  [ "$code" = 401 ] && ok "une clé d'inscription inventée est refusée (401)" || rate "clé inventée : $code"
+  code="$(api "$V/api/v1/appareils")"
+  [ "$code" = 401 ] && ok "la liste des appareils demande un jeton (401)" || rate "appareils sans jeton : $code"
+  local cle; cle="$(sasd cle --etiquette essai | tr -d '\r')"
+  code="$(api -X POST -d "{\"cle_inscription\":\"$cle\",\"cle_publique\":\"$NULLE\",\"nom\":\"x\"}" "$V/api/v1/connexion")"
+  [ "$code" = 400 ] && ok "une clé publique faible (nulle) est refusée (400)" || rate "clé nulle : $code"
+  api -X POST -d "{\"cle_inscription\":\"$cle\",\"cle_publique\":\"$CLE\",\"nom\":\"jetable\"}" "$V/api/v1/connexion" >/dev/null
+  code="$(api -X POST -d "{\"cle_inscription\":\"$cle\",\"cle_publique\":\"$CLE\",\"nom\":\"jetable\"}" "$V/api/v1/connexion")"
+  [ "$code" = 401 ] && ok "une clé d'inscription ne sert qu'une fois" || rate "clé réutilisée : $code"
+  sasd retirer jetable >/dev/null 2>&1 || true
 
-  # Le relais garde le DNS de Docker : son nom VPN se demande au résolveur du
-  # VPN, comme le fait Nginx.
+  dit "Dans le VPN, par notre tunnel"
+  local maison
+  maison="$("${LABO[@]}" exec -T poste sas appareils 2>/dev/null | awk '$1=="maison" {print $2}' | tr -d '\r' || true)"
+  [ -n "$maison" ] && ok "le poste voit maison ($maison) dans sa liste" || rate "le poste ne voit pas maison"
+
+  # Si le serveur vient de redémarrer, les appareils ont perdu leur session
+  # et doivent s'en apercevoir seuls. On leur laisse une minute.
+  local t0=$SECONDS joint=""
+  while [ $((SECONDS - t0)) -lt 60 ]; do
+    if "${LABO[@]}" exec -T poste wget -qO- -T 2 "http://$maison/" >/dev/null 2>&1 \
+       && docker compose exec -T sasd wget -qO- -T 2 "http://$maison/" >/dev/null 2>&1; then joint=1; break; fi
+    sleep 1
+  done
+  [ -n "$joint" ] && ok "tous les appareils sont joignables (en $((SECONDS - t0)) s)" || rate "des appareils restent injoignables après une minute"
+
   local nom
-  nom="$(docker compose exec -T relais nslookup maison.sas.internal 100.100.100.100 2>/dev/null \
-         | sed -n 's/^Address: *\(100\.[0-9.]*\).*/\1/p' | head -1)"
-  if [ -n "$nom" ] && docker compose exec -T relais wget -qO- -T 5 "http://$nom/" 2>/dev/null | grep -q Hostname; then
-    ok "le relais trouve maison.sas.internal ($nom) et atteint son service"
-  else rate "le relais n'atteint pas maison.sas.internal"; fi
+  nom="$(docker compose exec -T sasd nslookup maison.sas.internal 10.77.0.1 2>/dev/null \
+         | sed -n 's/^Address: *\(10\.[0-9.]*\).*/\1/p' | head -1 || true)"
+  if [ -n "$nom" ] && docker compose exec -T sasd wget -qO- -T 5 "http://$nom/" 2>/dev/null | grep -q Hostname; then
+    ok "le serveur trouve maison.sas.internal ($nom) et atteint son service"
+  else rate "le serveur n'atteint pas maison.sas.internal"; fi
 
   if "${LABO[@]}" exec -T poste wget -qO- -T 5 "http://$maison/" 2>/dev/null | grep -q Hostname; then
     ok "l'équipe atteint le service web de la maison"
   else rate "le poste n'atteint pas maison:80"; fi
 
   if "${LABO[@]}" exec -T poste wget -qO- -T 5 "http://$maison:8080/" >/dev/null 2>&1; then
-    rate "le poste atteint maison:8080, que la politique réserve aux admins"
+    rate "le poste atteint maison:8080, que la politique ne lui donne pas"
   else ok "maison:8080 reste fermé à l'équipe"; fi
 
   local poste
-  poste="$("${LABO[@]}" exec -T poste tailscale ip -4 2>/dev/null | head -1 | tr -d '\r' || true)"
+  poste="$("${LABO[@]}" exec -T poste sas etat 2>/dev/null | awk '{print $2}' | tr -d '\r' || true)"
   if "${LABO[@]}" exec -T maison wget -qO- -T 5 "http://$poste:80/" >/dev/null 2>&1 \
      || "${LABO[@]}" exec -T maison ping -c1 -W3 "$poste" >/dev/null 2>&1; then
     rate "maison atteint le poste : elle ne devrait rien pouvoir ouvrir"
   else ok "maison ne peut pas se retourner vers le poste"; fi
 
+  if docker compose exec -T sasd sh -c "nft list chain inet cybersas depuis_vpn" 2>/dev/null | grep -q "counter packets [1-9]"; then
+    ok "le pare-feu du serveur a bien bloqué des paquets"
+  else rate "le compteur de refus du pare-feu est resté à zéro"; fi
 
-  dit "Rejoindre le VPN"
-  # Un appareil neuf, sans clé : Headscale doit l'envoyer chez Google.
-  docker run -d --rm --name sas-essai-oidc --network cybersas_public --cap-add NET_ADMIN \
-    --device /dev/net/tun -e SSL_CERT_DIR=/etc/ssl/certs:/ca -v "$(cd "$ETAT/ca/public" && pwd -W 2>/dev/null || pwd):/ca:ro" \
-    tailscale/tailscale:v1.102.4 tailscaled --state=mem: >/dev/null
-  sleep 3
-  local url
-  url="$(docker exec sas-essai-oidc tailscale up --login-server="https://hs.$DOMAINE" --accept-dns=false --timeout=8s 2>&1 \
-         | grep -o "https://hs\.$DOMAINE/register/[^ ]*" | head -1 || true)"
-  docker rm -f sas-essai-oidc >/dev/null 2>&1 || true
-  loc="$(lieu hs "${url/hs.$DOMAINE/hs.$DOMAINE:$PORT_HTTPS}")"
-  [[ "$loc" == "https://accounts.google.com/"*"code_challenge_method=S256"* ]] \
-    && ok "un nouvel appareil est envoyé chez Google, avec PKCE" || rate "pas de renvoi vers Google (${loc:-rien})"
+  dit "Retirer un appareil le coupe"
+  sasd retirer poste >/dev/null
+  sleep 7
+  if "${LABO[@]}" exec -T poste wget -qO- -T 5 "http://$maison/" >/dev/null 2>&1; then
+    rate "le poste retiré atteint encore la maison"
+  else ok "le poste retiré n'atteint plus rien"; fi
+  # On le remet, pour que l'essai puisse se relancer.
+  "${LABO[@]}" exec -T poste rm -f /var/lib/sas/etat.json
+  inscrire poste --utilisateur essai@labo.local >/dev/null
 
   echo
   [ "$ECHECS" -eq 0 ] && dit "Tout est conforme." || meurt "$ECHECS vérification(s) en échec."
@@ -331,7 +317,7 @@ cmd_essai () {
 
 # --- divers -----------------------------------------------------------------
 
-cmd_etat ()      { charger_env; hs nodes list; }
+cmd_etat ()      { charger_env; sasd appareils; }
 cmd_arreter ()   { charger_env; "${LABO[@]}" down 2>/dev/null || true; docker compose down; }
 
 c="${1:-}"; shift || true

@@ -1,15 +1,18 @@
 # CyberSas : la pile qui tourne sur le serveur public (le VPS).
 #
-# Un seul conteneur touche Internet en entrée : le relais. Il porte les
-# ports 80 et 443, et Nginx vit dans son espace réseau. Headscale et
-# oauth2-proxy ne sont joignables qu'à travers Nginx.
+# sasd est tout le VPN : le moteur du tunnel, l'API où les appareils
+# s'inscrivent, le pare-feu entre appareils et le DNS du réseau.
 #
-# Le relais est aussi un nœud du VPN : c'est par lui que Nginx atteint les
-# services hébergés à la maison, sans qu'aucun port n'y soit ouvert.
+# porte ne fait rien : elle possède l'espace réseau, les ports et les noms,
+# et ne redémarre jamais. sasd et Nginx s'y greffent. Si l'un d'eux
+# redémarre, l'autre garde son réseau : c'est le conteneur « pause » des
+# pods Kubernetes.
 #
-# La connexion passe par Google : Headscale pour rejoindre le VPN,
-# oauth2-proxy pour les services web. Les deux ont donc une sortie vers
-# Internet, et seulement eux.
+# Comme Nginx partage l'interface du VPN que sasd crée, il atteint les
+# services de la maison par le tunnel, sans qu'aucun port ne soit ouvert
+# là-bas.
+#
+# oauth2-proxy protège les pages web publiées avec la connexion Google.
 #
 # Rien ne se lance à la main : scripts/sas.sh prépare les secrets et les
 # configurations dans etat/, puis démarre la pile.
@@ -24,37 +27,53 @@ x-journaux: &journaux
       max-file: "5"
 
 services:
-  relais:
-    image: tailscale/tailscale:v1.102.4
-    hostname: relais
+  porte:
+    image: alpine:3.24
     restart: unless-stopped
-    <<: *journaux
-    # tailscaled seul : l'inscription se fait ensuite par sas.sh, avec une
-    # clé à usage unique, pour qu'aucune clé ne dorme dans ce fichier.
-    command: ["tailscaled", "--state=/var/lib/tailscale/tailscaled.state", "--tun=tailscale0"]
-    cap_add: [NET_ADMIN, NET_RAW]
-    devices: ["/dev/net/tun:/dev/net/tun"]
-    environment:
-      # Les racines du système, plus l'autorité du labo quand il y en a une.
-      SSL_CERT_DIR: /etc/ssl/certs:/ca
-    volumes:
-      - relais:/var/lib/tailscale
-      - ./etat/ca/public:/ca:ro
+    command: ["sleep", "infinity"]
+    init: true
+    sysctls:
+      # Les paquets d'un appareil à l'autre traversent le serveur.
+      net.ipv4.ip_forward: "1"
     ports:
       - "${PORT_HTTP:-80}:80"
       - "${PORT_HTTPS:-443}:443"
+      - "${PORT_TUNNEL:-51820}:51820/udp"
     networks:
       public:
-        aliases: &noms ["hs.${DOMAINE}", "auth.${DOMAINE}", "maison.${DOMAINE}"]
+        aliases: &noms ["vpn.${DOMAINE}", "auth.${DOMAINE}", "maison.${DOMAINE}"]
       interne:
         aliases: *noms
+
+  sasd:
+    build: .
+    image: cybersas:dev
+    restart: unless-stopped
+    <<: *journaux
+    command: ["sasd"]
+    network_mode: service:porte
+    depends_on: [porte]
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    environment:
+      SAS_DOMAINE: ${DOMAINE}
+      SAS_POINT: vpn.${DOMAINE}:${PORT_TUNNEL:-51820}
+    volumes:
+      - sasd:/var/lib/sasd
+      - ./etat/sasd/equipe.txt:/config/equipe.txt:ro
+      - ./etat/sasd/clients_google:/config/clients_google:ro
+      - ./politique/politique.json:/config/politique.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/sante"]
+      interval: 5s
+      retries: 12
 
   nginx:
     image: nginx:1.30.5-alpine
     restart: unless-stopped
     <<: *journaux
-    network_mode: service:relais
-    depends_on: [relais]
+    network_mode: service:porte
+    depends_on: [porte]
     environment:
       DOMAINE: ${DOMAINE}
       # Seule DOMAINE est remplacée dans les modèles : $host et les autres
@@ -65,26 +84,6 @@ services:
       - ./nginx/extraits:/etc/nginx/extraits:ro
       - ./etat/tls:/etc/nginx/tls:ro
       - journaux-nginx:/var/log/nginx
-
-  headscale:
-    image: headscale/headscale:0.29.4
-    restart: unless-stopped
-    <<: *journaux
-    command: serve
-    read_only: true
-    tmpfs: [/var/run/headscale]
-    environment:
-      SSL_CERT_DIR: /etc/ssl/certs:/ca
-    volumes:
-      - ./etat/headscale:/etc/headscale:ro
-      - ./etat/secrets/google:/secrets:ro
-      - ./etat/ca/public:/ca:ro
-      - headscale:/var/lib/headscale
-    networks: [interne, sortie]
-    healthcheck:
-      test: ["CMD", "headscale", "health"]
-      interval: 10s
-      retries: 12
 
   oauth2-proxy:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
@@ -108,13 +107,12 @@ networks:
     internal: true
     ipam:
       config: [{subnet: 172.30.2.0/24}]
-  # La sortie vers Google, pour Headscale et oauth2-proxy seulement.
+  # La sortie vers Google, pour oauth2-proxy.
   sortie:
     name: cybersas_sortie
     ipam:
       config: [{subnet: 172.30.3.0/24}]
 
 volumes:
-  relais:
-  headscale:
+  sasd:
   journaux-nginx:

@@ -8,95 +8,81 @@ Ce que CyberSas protège, contre qui, et ce qu'il ne promet pas.
   personnes autorisées.
 - **L'adresse IP de la maison**, qui ne doit apparaître nulle part.
 - **L'accès de l'équipe.** Un mot de passe volé ne doit pas suffire.
-- **Le trafic entre appareils**, qui ne doit être lisible par personne d'autre,
-  y compris l'hébergeur du VPS.
+- **Le trafic des appareils**, qui ne doit être lisible par personne sur le
+  chemin : le Wi-Fi d'un café, un opérateur, l'hébergeur du VPS.
 
 ## Ce qui est exposé
 
-Sur Internet, trois noms en HTTPS sur le port 443, et le port 80 qui ne fait
-que rediriger :
+Sur Internet :
 
-- `hs.` : Headscale, pour que les appareils rejoignent le VPN.
-- `auth.` : le portail de connexion, qui renvoie chez Google.
-- `maison.` : un service de la maison, réservé aux comptes autorisés.
+- le port **UDP 51820**, celui du tunnel. Il ne répond qu'à une initiation
+  valide, venant d'une clé inscrite. À tout le reste, il ne répond rien : un
+  scan ne voit qu'un port muet ;
+- le port **443**, pour trois noms : `vpn.` (l'API d'inscription), `auth.` (la
+  connexion Google des pages web) et `maison.` (un service publié) ;
+- le port 80, qui ne fait que rediriger.
 
-Tout autre nom est coupé avant même l'échange de certificat. Headscale et
-oauth2-proxy n'écoutent pas sur Internet : seul Nginx peut les atteindre, par
-un réseau Docker interne sans passerelle. Ils ont une sortie vers Internet,
-et une seule raison de s'en servir : parler à Google.
-
-## Pourquoi Google
-
-L'identité est confiée à Google plutôt que gérée ici. Ce que ça apporte :
-
-- **Aucun mot de passe stocké.** Il n'y a rien à voler sur le VPS.
-- **Le second facteur est celui du compte Google**, déjà réglé sur le
-  téléphone de chacun, avec l'alerte de connexion suspecte qui va avec.
-- **Pas de réinitialisation à gérer.** Un mot de passe oublié se règle chez
-  Google.
-
-Ce que ça coûte :
-
-- **Google devient un tiers de confiance.** S'il est en panne, personne ne peut
-  se connecter. Les appareils déjà dans le VPN restent connectés, jusqu'à
-  l'expiration de leur inscription, trente jours après.
-- **Un compte Google volé ouvre le VPN.** Le second facteur limite ce risque,
-  mais CyberSas ne peut pas l'imposer : il dépend du réglage de chaque compte.
-- **Google sait qui se connecte, et quand.** Il ne voit rien de ce qui passe
-  ensuite dans le VPN.
-
-Le contrôle d'accès reste ici. Avoir un compte Google ne suffit pas : il faut
-que l'adresse figure dans `etat/equipe.txt`. Headscale et oauth2-proxy
-vérifient tous les deux la même liste, et exigent une adresse vérifiée par
-Google.
+Tout autre nom est coupé avant même l'échange de certificat. L'API de sasd
+n'écoute que sur 127.0.0.1 : on ne l'atteint qu'à travers Nginx.
 
 ## Contre qui
 
-**Quelqu'un qui scanne Internet.** Il trouve un Nginx qui ne répond qu'à trois
-noms, et un port 80 qui redirige. Aucune version n'est affichée
-(`server_tokens off`).
+**Quelqu'un qui écoute le réseau.** Il voit des paquets UDP chiffrés et leur
+taille, arrondie à 16 octets. Ni le contenu, ni les adresses internes, ni
+l'identité de l'appareil : la clé statique du client voyage chiffrée.
 
-**Quelqu'un qui veut détourner la connexion.** Le retour depuis Google n'est
-accepté que vers les sous-domaines du domaine, et l'échange de code est protégé
-par PKCE : un code intercepté ne sert à rien sans le secret que seul le
-navigateur d'origine possède.
+**Quelqu'un qui rejoue ou modifie des paquets.** Un paquet modifié échoue à la
+vérification de son tag. Un paquet rejoué porte un compteur déjà vu. Une
+initiation rejouée porte un horodatage trop ancien. Les trois sont rejetés en
+silence. Voir [`protocole.md`](protocole.md).
+
+**Quelqu'un qui veut entrer sans y être invité.** Il lui faut un jeton Google
+émis pour notre application, pour une adresse vérifiée par Google et présente
+dans la liste de l'équipe. Ou une clé d'inscription, qui expire en dix minutes
+et ne sert qu'une fois. L'API d'inscription est limitée à dix tentatives par
+minute et par adresse.
 
 **Un membre de l'équipe qui va trop loin**, volontairement ou parce que son
-appareil est compromis. La politique du VPN ferme tout par défaut : il n'atteint
-que ce que son groupe autorise, ici les services web de la maison, pas leur SSH.
-Il ne voit pas les appareils des autres membres. Le retirer de la liste
-déconnecte aussi ses appareils.
+appareil est compromis. Le pare-feu du serveur ferme tout par défaut : il
+n'atteint que ce que son groupe autorise. Il ne peut pas usurper l'adresse d'un
+autre appareil, le tunnel vérifie la source de chaque paquet. Le retirer de la
+liste coupe ses appareils en cinq secondes.
 
 **Un service de la maison compromis.** Il ne peut se retourner vers aucun
-appareil du VPN : aucune règle ne part de `tag:maison`.
+appareil : aucune règle ne part de `etiquette:maison`.
 
-**L'hébergeur du VPS.** Il voit passer le trafic chiffré du VPN, mais pas son
-contenu : WireGuard chiffre de bout en bout, et les clés privées ne quittent pas
-les appareils. En revanche, il voit en clair ce que Nginx publie sur `maison.`,
-puisque le TLS se termine sur le VPS. Voir plus bas.
+## Ce que CyberSas ne promet pas
+
+**Le protocole n'est pas audité.** Il reprend l'architecture de WireGuard et
+ses primitives sont standard. Ses tests prouvent qu'il suit la spécification
+Noise et refuse les attaques connues. Mais un protocole maison, c'est du code
+que personne d'autre n'a relu. Pour des données vraiment sensibles, WireGuard
+reste le choix raisonnable.
+
+**Le serveur voit le trafic entre appareils.** Chaque appareil n'a de session
+qu'avec le serveur. Un paquet du poste vers la maison est déchiffré sur le VPS,
+passe le pare-feu, puis est rechiffré pour la maison. L'hébergeur du VPS, ou
+quiconque le compromet, peut donc lire ce trafic. C'est le prix d'une
+architecture en étoile, et aussi ce qui permet d'appliquer les règles d'accès
+au centre, là où un appareil ne peut pas les contourner. Chiffrer de bout en
+bout sur ce trafic, avec TLS ou SSH dans le tunnel, reste une bonne habitude.
+
+**Pas de protection contre l'inondation de poignées de main.** Chaque
+initiation, même fausse, coûte un calcul au serveur avant d'être rejetée.
+
+**Google devient un tiers de confiance.** S'il est en panne, personne ne peut
+s'inscrire. Les appareils déjà inscrits continuent de fonctionner : le tunnel
+ne se fie qu'aux clés. Un compte Google volé permet d'inscrire un appareil : le
+second facteur du compte limite ce risque, mais CyberSas ne peut pas l'imposer.
 
 ## Si le VPS tombe aux mains d'un attaquant
 
-C'est le scénario le plus grave, et il vaut mieux le dire franchement.
-
-- Il contrôle Headscale : il peut **ajouter un appareil à lui** dans le VPN, ou
-  modifier la politique. Les règles d'accès ne protègent donc pas contre le VPS
-  lui-même.
-- Il voit en clair le trafic des services publiés par Nginx.
-- Il récupère le secret du client Google. Ce secret ne donne accès à aucun
-  compte : il permet seulement de se faire passer pour CyberSas auprès de
-  Google. Il faut alors le régénérer dans la console Google Cloud.
-- Il ne peut **pas** lire le trafic entre deux appareils de l'équipe, qui ne
-  passe pas par le VPS en clair.
-
-Ce qui limite les dégâts : le relais du VPS n'a le droit d'atteindre que les
-ports web de la maison. Pour aller plus loin, un attaquant doit inscrire un
-nouvel appareil, ce qui laisse une trace dans les journaux de Headscale. C'est
-pour ça que la surveillance de ces journaux fait partie de la suite du projet.
-
-## Ce que CyberSas ne fait pas encore
-
-- **Pas de blocage automatique des adresses** qui insistent. CrowdSec viendra.
-- **Pas d'alertes.** Les journaux sont en JSON, prêts à partir vers un SIEM,
-  mais rien ne les lit encore.
-- **Pas de sauvegarde** de la base de Headscale.
+- Il lit le trafic qui traverse le serveur, comme expliqué plus haut.
+- Il peut inscrire ses propres appareils et modifier la politique.
+- Il récupère la clé privée du serveur et peut se faire passer pour lui. Il
+  faut alors en générer une nouvelle, ce qui oblige tous les appareils à se
+  réinscrire.
+- Il récupère le secret du client Google, qui ne donne accès à aucun compte
+  mais doit être régénéré dans la console Google Cloud.
+- Il ne récupère aucune clé privée d'appareil : elles n'ont jamais quitté les
+  appareils.

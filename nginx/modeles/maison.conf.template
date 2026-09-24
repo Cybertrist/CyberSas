@@ -18,8 +18,8 @@ server {
         include /etc/nginx/extraits/google-verifier.conf;
         include /etc/nginx/extraits/proxy.conf;
 
-        # 100.100.100.100 : le résolveur du VPN, servi par tailscaled.
-        resolver 100.100.100.100 valid=30s ipv6=off;
+        # 10.77.0.1 : le DNS du VPN, servi par sasd.
+        resolver 10.77.0.1 valid=30s ipv6=off;
         set $maison http://maison.sas.internal;
         proxy_pass $maison;
     }

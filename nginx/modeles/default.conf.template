@@ -4,7 +4,7 @@
 # répondrait sinon à n'importe quel nom d'hôte.
 
 # Les noms Docker se résolvent à la requête, pas au démarrage : Nginx
-# démarre même si Headscale ou Authelia ne sont pas encore prêts.
+# démarre même si Headscale ou oauth2-proxy ne sont pas encore prêts.
 resolver 127.0.0.11 valid=10s ipv6=off;
 
 server_tokens off;
@@ -15,7 +15,7 @@ map $http_upgrade $connection_upgrade {
 }
 
 # Un journal par ligne, en JSON : prêt à partir vers un SIEM. L'utilisateur
-# est celui qu'Authelia a reconnu, vide sur les pages non protégées.
+# est l'adresse Google reconnue, vide sur les pages non protégées.
 log_format sas escape=json '{"date":"$time_iso8601","ip":"$remote_addr",'
     '"hote":"$host","methode":"$request_method","uri":"$request_uri",'
     '"statut":$status,"octets":$body_bytes_sent,"duree":$request_time,'

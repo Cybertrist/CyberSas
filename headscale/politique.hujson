@@ -3,14 +3,12 @@
 // Tout ce qui n'est pas autorisé ici est refusé : sans règle, deux
 // appareils du même réseau ne se voient pas.
 //
-// Un utilisateur s'écrit avec un @ final : « tristan@ ». Les groupes
-// d'Authelia ne remontent pas jusqu'ici, il faut donc tenir les deux listes
-// à jour ensemble. Après une modification :
-//   bash scripts/sas.sh politique
+// Modèle : les membres des groupes viennent de etat/equipe.txt, que
+// sas.sh membre tient à jour. Ne pas écrire d'adresse ici.
 {
   "groups": {
-    "group:admins": ["tristan@"],
-    "group:equipe": ["essai@"]
+    "group:admins": [@ADMINS@],
+    "group:equipe": [@EQUIPE@]
   },
 
   // Les étiquettes désignent des machines, pas des personnes. Seuls les

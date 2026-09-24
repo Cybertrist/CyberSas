@@ -1,18 +1,19 @@
 #!/bin/bash
 # CyberSas : tout ce qu'on fait sur la pile passe par ce script.
 #
-#   sas.sh init                              secrets, autorité du labo, configurations
-#   sas.sh utilisateur <login> <email> <nom> <groupe>
-#                                            crée un compte, ou refait son mot de passe
-#   sas.sh demarrer                          lance la pile et inscrit le relais au VPN
-#   sas.sh labo                              lance la fausse maison et le poste d'essai
-#   sas.sh essai                             vérifie que tout répond comme prévu
-#   sas.sh politique                         recharge les règles d'accès du VPN
-#   sas.sh etat                              les appareils du VPN
-#   sas.sh arreter                           arrête tout, sans rien effacer
+#   sas.sh init                      secrets, autorité du labo, configurations
+#   sas.sh google <id> <secret>      le client OAuth créé dans Google Cloud
+#   sas.sh membre <email> <groupe>   donne l'accès à un compte Google (admins ou equipe)
+#   sas.sh retirer <email>           le lui retire
+#   sas.sh demarrer                  lance la pile et inscrit le relais au VPN
+#   sas.sh labo                      lance la fausse maison et le poste d'essai
+#   sas.sh essai                     vérifie que tout répond comme prévu
+#   sas.sh etat                      les appareils du VPN
+#   sas.sh arreter                   arrête tout, sans rien effacer
 #
 # Tout ce qui est secret ou propre à une installation s'écrit dans etat/,
-# qui n'est jamais versionné.
+# qui n'est jamais versionné. etat/equipe.txt est la seule liste des
+# personnes autorisées : le VPN et les services web la lisent tous deux.
 set -euo pipefail
 
 # Sous Git Bash, sans cela, « /CN=... » et « /secrets » deviendraient des
@@ -25,14 +26,14 @@ RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$RACINE"
 # Relatif : openssl sous Git Bash ne lit pas les chemins /c/...
 ETAT="etat"
-AUTHELIA_IMAGE="authelia/authelia:4.39.28"
+EQUIPE="$ETAT/equipe.txt"
+GOOGLE="$ETAT/secrets/google"
 LABO=(docker compose -f labo/maison.yaml)
 
 dit ()    { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok ()     { printf '  \033[32mok\033[0m  %s\n' "$*"; }
 rate ()   { printf '  \033[31mKO\033[0m  %s\n' "$*"; ECHECS=$((ECHECS+1)); }
 meurt ()  { printf '\033[31merreur :\033[0m %s\n' "$*" >&2; exit 1; }
-alea ()   { openssl rand -hex "${1:-32}"; }
 
 charger_env () {
   [ -f .env ] || meurt ".env manquant : copier .env.exemple en .env et le remplir."
@@ -41,18 +42,12 @@ charger_env () {
   PORT_HTTPS="${PORT_HTTPS:-443}"
 }
 
-# Empreinte d'un secret, calculée par Authelia elle-même : on n'a pas à
-# réimplémenter pbkdf2 ou argon2.
-empreinte () {
-  docker run --rm "$AUTHELIA_IMAGE" authelia crypto hash generate "$1" ${3:-} --password "$2" \
-    | sed -n 's/^Digest: //p'
-}
-
 # Champ d'un objet JSON sur une ligne, sans jq : assez pour lire ce que
 # rendent headscale et tailscale.
 champ () { grep -o "\"$1\": *\"\?[^\",}]*" | head -1 | sed 's/.*: *"\{0,1\}//'; }
 
 hs () { docker compose exec -T headscale headscale "$@"; }
+en_route () { docker compose ps --status running --services 2>/dev/null | grep -qx "$1"; }
 
 # --- init -------------------------------------------------------------------
 
@@ -85,18 +80,49 @@ init_ca () {
 }
 
 init_secrets () {
-  local a="$ETAT/secrets/authelia" h="$ETAT/secrets/headscale"
-  mkdir -p "$a" "$h"
-  for s in session stockage jwt oidc_hmac; do
-    [ -f "$a/$s" ] || { alea > "$a/$s"; ok "secret Authelia : $s"; }
-  done
-  [ -f "$a/oidc_jwks.pem" ] || { openssl genrsa -out "$a/oidc_jwks.pem" 4096 2>/dev/null; ok "clé de signature OIDC"; }
-  # Headscale garde le secret en clair, Authelia n'en garde que l'empreinte.
-  if [ ! -f "$h/oidc_client_secret" ]; then
-    alea 48 > "$h/oidc_client_secret"
-    empreinte pbkdf2 "$(cat "$h/oidc_client_secret")" "--variant sha512" > "$a/headscale_oidc_empreinte"
-    [ -s "$a/headscale_oidc_empreinte" ] || meurt "Authelia n'a pas rendu d'empreinte (Docker tourne ?)"
-    ok "secret du client OIDC Headscale"
+  mkdir -p "$GOOGLE"
+  # La clé qui chiffre le cookie de session. Lue dans un fichier,
+  # oauth2-proxy la prend octet pour octet : 32 caractères, sans retour à
+  # la ligne, soit une clé AES-256.
+  [ -f "$GOOGLE/cookie_secret" ] || { printf '%s' "$(openssl rand -hex 16)" > "$GOOGLE/cookie_secret"; ok "clé des cookies"; }
+  # Tant que le vrai client Google n'est pas là, des valeurs de réserve
+  # laissent la pile démarrer : tout marche jusqu'à la page de Google.
+  [ -f "$GOOGLE/client_id" ]     || { echo "a-remplir.apps.googleusercontent.com" > "$GOOGLE/client_id"; ok "client Google provisoire"; }
+  [ -f "$GOOGLE/client_secret" ] || echo "a-remplir" > "$GOOGLE/client_secret"
+}
+
+# Écrit les configurations de etat/ à partir des modèles et de equipe.txt.
+rendre () {
+  mkdir -p "$ETAT/headscale" "$ETAT/oauth2-proxy"
+  touch "$EQUIPE"
+  local id; id="$(cat "$GOOGLE/client_id")"
+  local mails admins equipe
+  mails="$(awk 'NF>=2 && $1 !~ /^#/ {print $1}' "$EQUIPE")"
+  # Dans la politique, une adresse email désigne son propriétaire.
+  admins="$(awk 'NF>=2 && $2=="admins" {printf "%s\"%s\"", (n++?", ":""), $1}' "$EQUIPE")"
+  equipe="$(awk 'NF>=2 && $2=="equipe" {printf "%s\"%s\"", (n++?", ":""), $1}' "$EQUIPE")"
+  # Le poste d'essai du labo est un utilisateur local, sans compte Google.
+  if [ "${TLS:-labo}" = labo ]; then equipe="${equipe:+$equipe, }\"essai@\""; fi
+
+  printf '%s\n' "$mails" > "$ETAT/oauth2-proxy/emails.txt"
+  local liste; liste="$(printf '%s\n' "$mails" | awk 'NF {print "    - \"" $1 "\""}')"
+  [ -n "$liste" ] || liste='    - "personne@invalid"'
+  awk -v d="$DOMAINE" -v i="$id" -v l="$liste" '
+    $0 == "@UTILISATEURS@" { print l; next }
+    { gsub(/@DOMAINE@/, d); gsub(/@GOOGLE_CLIENT_ID@/, i); print }' \
+    headscale/config.yaml > "$ETAT/headscale/config.yaml"
+  sed -e "s|@ADMINS@|$admins|" -e "s|@EQUIPE@|$equipe|" headscale/politique.hujson > "$ETAT/headscale/politique.hujson"
+  sed -e "s|@DOMAINE@|$DOMAINE|g" -e "s|@GOOGLE_CLIENT_ID@|$id|g" oauth2-proxy/oauth2-proxy.cfg > "$ETAT/oauth2-proxy/oauth2-proxy.cfg"
+}
+
+# Après un changement d'accès : Headscale relit sa liste au démarrage,
+# oauth2-proxy surveille la sienne.
+appliquer () {
+  rendre
+  ok "configurations réécrites"
+  if en_route headscale; then
+    docker compose restart headscale oauth2-proxy >/dev/null 2>&1
+    ok "Headscale et oauth2-proxy relancés"
   fi
 }
 
@@ -107,44 +133,53 @@ cmd_init () {
   if [ "${TLS:-labo}" = labo ]; then init_ca; else ok "TLS=$TLS : rien à faire ici"; fi
   dit "Secrets"
   init_secrets
-  dit "Configurations"
-  mkdir -p "$ETAT/headscale" "$ETAT/authelia"
-  sed "s/@DOMAINE@/$DOMAINE/g" headscale/config.yaml > "$ETAT/headscale/config.yaml"
-  ok "etat/headscale/config.yaml"
-  if [ ! -f "$ETAT/authelia/utilisateurs.yml" ]; then
-    : "${ADMIN_LOGIN:?ADMIN_LOGIN manque dans .env}" "${ADMIN_EMAIL:?ADMIN_EMAIL manque dans .env}"
-    printf 'users:\n' > "$ETAT/authelia/utilisateurs.yml"
-    cmd_utilisateur "$ADMIN_LOGIN" "$ADMIN_EMAIL" "${ADMIN_NOM:-$ADMIN_LOGIN}" admins
+  dit "Accès"
+  if [ ! -s "$EQUIPE" ] && [ -n "${ADMIN_EMAIL:-}" ]; then
+    printf '# adresse Google        groupe (admins ou equipe)\n%s admins\n' "$ADMIN_EMAIL" > "$EQUIPE"
+    ok "$ADMIN_EMAIL admin"
   fi
-  dit "Prêt. Suite : bash scripts/sas.sh demarrer"
+  rendre
+  ok "configurations écrites dans etat/"
+  dit "Prêt. Suite : bash scripts/sas.sh google <id> <secret>, puis demarrer"
 }
 
-# --- utilisateurs -----------------------------------------------------------
+# --- Google et accès ----------------------------------------------------------
 
-cmd_utilisateur () {
-  [ $# -eq 4 ] || meurt "usage : sas.sh utilisateur <login> <email> <nom> <admins|equipe>"
-  local login="$1" email="$2" nom="$3" groupe="$4" f="$ETAT/authelia/utilisateurs.yml"
+cmd_google () {
+  [ $# -eq 2 ] || meurt "usage : sas.sh google <client_id> <client_secret>"
+  [[ "$1" == *.apps.googleusercontent.com ]] || meurt "un identifiant Google finit par .apps.googleusercontent.com"
+  mkdir -p "$GOOGLE"
+  printf '%s\n' "$1" > "$GOOGLE/client_id"
+  printf '%s\n' "$2" > "$GOOGLE/client_secret"
+  ok "client Google enregistré"
+  appliquer
+}
+
+cmd_membre () {
+  [ $# -eq 2 ] || meurt "usage : sas.sh membre <adresse google> <admins|equipe>"
+  local mail="${1,,}" groupe="$2"
   case "$groupe" in admins|equipe) ;; *) meurt "groupe inconnu : $groupe (admins ou equipe)";; esac
-  [[ "$login" =~ ^[a-z][a-z0-9._-]*$ ]] || meurt "login : minuscules, chiffres, . _ -"
-  [ -f "$f" ] || printf 'users:\n' > "$f"
-  local mdp; mdp="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-20)"
-  local hash; hash="$(empreinte argon2 "$mdp")"
-  [ -n "$hash" ] || meurt "Authelia n'a pas rendu d'empreinte (Docker tourne ?)"
-  # Retire l'ancien bloc du même login, puis écrit le nouveau.
-  awk -v l="  $login:" '$0==l{skip=1;next} skip && /^  [^ ]/{skip=0} !skip' "$f" > "$f.tmp"
-  cat >> "$f.tmp" <<EOF
-  $login:
-    disabled: false
-    displayname: '$nom'
-    email: '$email'
-    password: '$hash'
-    groups: ['$groupe']
-EOF
-  mv "$f.tmp" "$f"
-  ok "compte $login ($groupe)"
-  printf '\n     mot de passe provisoire : \033[1m%s\033[0m\n' "$mdp"
-  printf '     il ne sera plus jamais affiché. Le second facteur se règle à la première connexion.\n'
-  printf '     Pour le VPN, ajouter aussi « %s@ » dans group:%s de headscale/politique.hujson.\n\n' "$login" "$groupe"
+  [[ "$mail" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[a-z]+$ ]] || meurt "adresse invalide : $mail"
+  touch "$EQUIPE"
+  awk -v m="$mail" '$1 != m' "$EQUIPE" > "$EQUIPE.tmp" && mv "$EQUIPE.tmp" "$EQUIPE"
+  printf '%s %s\n' "$mail" "$groupe" >> "$EQUIPE"
+  ok "$mail : $groupe"
+  appliquer
+}
+
+cmd_retirer () {
+  [ $# -eq 1 ] || meurt "usage : sas.sh retirer <adresse google>"
+  local mail="${1,,}"
+  grep -q "^$mail " "$EQUIPE" 2>/dev/null || meurt "$mail n'est pas dans l'équipe"
+  awk -v m="$mail" '$1 != m' "$EQUIPE" > "$EQUIPE.tmp" && mv "$EQUIPE.tmp" "$EQUIPE"
+  ok "$mail retiré"
+  appliquer
+  # Ses appareils déjà connectés restent inscrits : on les expire.
+  if en_route headscale; then
+    local ids
+    ids="$(hs nodes list -o json 2>/dev/null | tr -d '\n' | sed 's/},{"id"/}\n{"id"/g' | grep -i "\"$mail\"" | grep -o '^{"id": *[0-9]*' | grep -o '[0-9]*$' || true)"
+    for i in $ids; do hs nodes expire -i "$i" >/dev/null && ok "appareil $i déconnecté"; done
+  fi
 }
 
 # --- démarrage ---------------------------------------------------------------
@@ -155,7 +190,7 @@ attendre_headscale () {
     hs health >/dev/null 2>&1 && return 0
     sleep 2
   done
-  docker compose logs --tail 30 headscale authelia nginx
+  docker compose logs --tail 30 headscale oauth2-proxy nginx
   meurt "Headscale ne répond pas après deux minutes."
 }
 
@@ -222,11 +257,23 @@ cmd_essai () {
   code="$("${c[@]}" $r "hs.$DOMAINE:$PORT_HTTPS:127.0.0.1" "https://hs.$DOMAINE:$PORT_HTTPS/health" || true)"
   [ "$code" = 200 ] && ok "hs.$DOMAINE/health répond 200" || rate "hs.$DOMAINE/health : $code"
 
-  code="$("${c[@]}" $r "auth.$DOMAINE:$PORT_HTTPS:127.0.0.1" "https://auth.$DOMAINE:$PORT_HTTPS/api/health" || true)"
-  [ "$code" = 200 ] && ok "le portail Authelia répond" || rate "auth.$DOMAINE/api/health : $code"
+  # L'adresse vers laquelle une page renvoie, sans la suivre.
+  lieu () {
+    curl -s -D - -o "$NUL" --max-time 10 --ssl-no-revoke --cacert "$ETAT/ca/public/cybersas-ca.pem" \
+      --resolve "$1.$DOMAINE:$PORT_HTTPS:127.0.0.1" "$2" 2>/dev/null | tr -d '\r' | sed -n 's/^[Ll]ocation: //p' || true
+  }
 
-  code="$("${c[@]}" $r "maison.$DOMAINE:$PORT_HTTPS:127.0.0.1" "https://maison.$DOMAINE:$PORT_HTTPS/" || true)"
-  [ "$code" = 302 ] && ok "maison.$DOMAINE renvoie vers la connexion (302)" || rate "maison.$DOMAINE sans session : $code, 302 attendu"
+  code="$("${c[@]}" $r "auth.$DOMAINE:$PORT_HTTPS:127.0.0.1" "https://auth.$DOMAINE:$PORT_HTTPS/ping" || true)"
+  [ "$code" = 200 ] && ok "le portail de connexion répond" || rate "auth.$DOMAINE/ping : $code"
+
+  local loc
+  loc="$(lieu maison "https://maison.$DOMAINE:$PORT_HTTPS/")"
+  [[ "$loc" == "https://auth.$DOMAINE/oauth2/start?rd=https://maison.$DOMAINE"* ]] \
+    && ok "maison.$DOMAINE renvoie vers la connexion" || rate "maison.$DOMAINE sans session : ${loc:-pas de renvoi}"
+
+  loc="$(lieu auth "https://auth.$DOMAINE:$PORT_HTTPS/oauth2/start?rd=https://maison.$DOMAINE/")"
+  [[ "$loc" == "https://accounts.google.com/"*"code_challenge_method=S256"* ]] \
+    && ok "la connexion part chez Google, avec PKCE" || rate "auth.$DOMAINE/oauth2/start : ${loc:-pas de renvoi}"
 
   code="$(curl -sk -o "$NUL" -w '%{http_code}' --max-time 5 --resolve "inconnu.test:$PORT_HTTPS:127.0.0.1" "https://inconnu.test:$PORT_HTTPS/" || true)"
   [ "$code" = 000 ] && ok "un nom inconnu n'obtient même pas de certificat" || rate "nom inconnu : $code, coupure attendue"
@@ -263,22 +310,20 @@ cmd_essai () {
     rate "maison atteint le poste : elle ne devrait rien pouvoir ouvrir"
   else ok "maison ne peut pas se retourner vers le poste"; fi
 
+
   dit "Rejoindre le VPN"
-  # Un appareil neuf, sans clé : Headscale doit l'envoyer chez Authelia.
+  # Un appareil neuf, sans clé : Headscale doit l'envoyer chez Google.
   docker run -d --rm --name sas-essai-oidc --network cybersas_public --cap-add NET_ADMIN \
     --device /dev/net/tun -e SSL_CERT_DIR=/etc/ssl/certs:/ca -v "$(cd "$ETAT/ca/public" && pwd -W 2>/dev/null || pwd):/ca:ro" \
     tailscale/tailscale:v1.102.4 tailscaled --state=mem: >/dev/null
   sleep 3
-  local url loc
+  local url
   url="$(docker exec sas-essai-oidc tailscale up --login-server="https://hs.$DOMAINE" --accept-dns=false --timeout=8s 2>&1 \
          | grep -o "https://hs\.$DOMAINE/register/[^ ]*" | head -1 || true)"
   docker rm -f sas-essai-oidc >/dev/null 2>&1 || true
-  loc="$(curl -s -D - -o "$NUL" --max-time 10 --ssl-no-revoke --cacert "$ETAT/ca/public/cybersas-ca.pem" \
-         --resolve "hs.$DOMAINE:$PORT_HTTPS:127.0.0.1" "${url/hs.$DOMAINE/hs.$DOMAINE:$PORT_HTTPS}" 2>/dev/null \
-         | tr -d '\r' | sed -n 's/^[Ll]ocation: //p')"
-  if [[ "$loc" == "https://auth.$DOMAINE/api/oidc/authorization?"*"code_challenge_method=S256"* ]]; then
-    ok "un nouvel appareil est envoyé chez Authelia, avec PKCE"
-  else rate "pas de renvoi vers Authelia (${loc:-rien})"; fi
+  loc="$(lieu hs "${url/hs.$DOMAINE/hs.$DOMAINE:$PORT_HTTPS}")"
+  [[ "$loc" == "https://accounts.google.com/"*"code_challenge_method=S256"* ]] \
+    && ok "un nouvel appareil est envoyé chez Google, avec PKCE" || rate "pas de renvoi vers Google (${loc:-rien})"
 
   echo
   [ "$ECHECS" -eq 0 ] && dit "Tout est conforme." || meurt "$ECHECS vérification(s) en échec."
@@ -286,19 +331,19 @@ cmd_essai () {
 
 # --- divers -----------------------------------------------------------------
 
-cmd_politique () { charger_env; docker compose kill -s HUP headscale >/dev/null; sleep 2; docker compose logs --tail 5 headscale; }
 cmd_etat ()      { charger_env; hs nodes list; }
 cmd_arreter ()   { charger_env; "${LABO[@]}" down 2>/dev/null || true; docker compose down; }
 
 c="${1:-}"; shift || true
 case "$c" in
   init) cmd_init ;;
-  utilisateur) charger_env; cmd_utilisateur "$@" ;;
+  google) charger_env; cmd_google "$@" ;;
+  membre) charger_env; cmd_membre "$@" ;;
+  retirer) charger_env; cmd_retirer "$@" ;;
   demarrer) cmd_demarrer ;;
   labo) cmd_labo ;;
   essai) cmd_essai ;;
-  politique) cmd_politique ;;
   etat) cmd_etat ;;
   arreter) cmd_arreter ;;
-  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

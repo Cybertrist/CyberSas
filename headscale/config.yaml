@@ -1,6 +1,6 @@
 # Headscale : le serveur de coordination du VPN.
 #
-# Modèle : sas.sh remplace @DOMAINE@ et écrit le résultat dans
+# Modèle : sas.sh remplace les @...@ et écrit le résultat dans
 # etat/headscale/config.yaml. Ne pas lancer Headscale sur ce fichier-ci.
 #
 # Headscale ne voit jamais Internet en direct. Nginx termine le TLS et lui
@@ -59,7 +59,7 @@ log:
 
 policy:
   mode: file
-  path: /etc/headscale-politique/politique.hujson
+  path: /etc/headscale/politique.hujson
 
 dns:
   magic_dns: true
@@ -75,17 +75,20 @@ dns:
 unix_socket: /var/run/headscale/headscale.sock
 unix_socket_permission: "0770"
 
-# La connexion passe par Authelia : identifiant, mot de passe et second
-# facteur. Le secret du client est lu dans un fichier, jamais écrit ici.
+# La connexion passe par Google : le mot de passe et le second facteur sont
+# ceux du compte Google, jamais vus ici. Le secret du client est lu dans un
+# fichier. Seules les adresses de equipe.txt peuvent entrer.
 oidc:
   only_start_if_oidc_is_available: true
-  issuer: https://auth.@DOMAINE@
-  client_id: headscale
-  client_secret_path: /secrets/oidc_client_secret
-  scope: ["openid", "profile", "email", "groups"]
+  issuer: https://accounts.google.com
+  client_id: "@GOOGLE_CLIENT_ID@"
+  client_secret_path: /secrets/client_secret
+  scope: ["openid", "profile", "email"]
   pkce:
     enabled: true
     method: S256
+  allowed_users:
+@UTILISATEURS@
 
 logtail:
   enabled: false

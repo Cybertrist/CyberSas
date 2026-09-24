@@ -1,11 +1,15 @@
 # CyberSas : la pile qui tourne sur le serveur public (le VPS).
 #
-# Un seul conteneur touche Internet : le relais. Il porte les ports 80 et
-# 443, et Nginx vit dans son espace réseau. Headscale et Authelia sont sur
-# un réseau interne sans sortie, joignables seulement à travers Nginx.
+# Un seul conteneur touche Internet en entrée : le relais. Il porte les
+# ports 80 et 443, et Nginx vit dans son espace réseau. Headscale et
+# oauth2-proxy ne sont joignables qu'à travers Nginx.
 #
 # Le relais est aussi un nœud du VPN : c'est par lui que Nginx atteint les
 # services hébergés à la maison, sans qu'aucun port n'y soit ouvert.
+#
+# La connexion passe par Google : Headscale pour rejoindre le VPN,
+# oauth2-proxy pour les services web. Les deux ont donc une sortie vers
+# Internet, et seulement eux.
 #
 # Rien ne se lance à la main : scripts/sas.sh prépare les secrets et les
 # configurations dans etat/, puis démarre la pile.
@@ -73,33 +77,25 @@ services:
       SSL_CERT_DIR: /etc/ssl/certs:/ca
     volumes:
       - ./etat/headscale:/etc/headscale:ro
-      - ./headscale/politique.hujson:/etc/headscale-politique/politique.hujson:ro
-      - ./etat/secrets/headscale:/secrets:ro
+      - ./etat/secrets/google:/secrets:ro
       - ./etat/ca/public:/ca:ro
       - headscale:/var/lib/headscale
-    networks: [interne]
+    networks: [interne, sortie]
     healthcheck:
       test: ["CMD", "headscale", "health"]
       interval: 10s
       retries: 12
 
-  authelia:
-    image: authelia/authelia:4.39.28
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
     restart: unless-stopped
     <<: *journaux
-    environment:
-      DOMAINE: ${DOMAINE}
-      X_AUTHELIA_CONFIG_FILTERS: template
-      AUTHELIA_SESSION_SECRET_FILE: /secrets/session
-      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /secrets/stockage
-      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /secrets/jwt
-      AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE: /secrets/oidc_hmac
+    command: ["--config=/config/oauth2-proxy.cfg"]
+    read_only: true
     volumes:
-      - ./authelia/configuration.yml:/config/configuration.yml:ro
-      - ./etat/authelia:/utilisateurs
-      - ./etat/secrets/authelia:/secrets:ro
-      - authelia:/data
-    networks: [interne]
+      - ./etat/oauth2-proxy:/config:ro
+      - ./etat/secrets/google:/secrets:ro
+    networks: [interne, sortie]
 
 networks:
   public:
@@ -108,13 +104,17 @@ networks:
       config: [{subnet: 172.30.1.0/24}]
   interne:
     name: cybersas_interne
-    # Pas de passerelle : Headscale et Authelia ne sortent jamais d'eux-mêmes.
+    # Pas de passerelle : ce qui n'est que sur ce réseau ne sort jamais.
     internal: true
     ipam:
       config: [{subnet: 172.30.2.0/24}]
+  # La sortie vers Google, pour Headscale et oauth2-proxy seulement.
+  sortie:
+    name: cybersas_sortie
+    ipam:
+      config: [{subnet: 172.30.3.0/24}]
 
 volumes:
   relais:
   headscale:
-  authelia:
   journaux-nginx:

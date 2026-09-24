@@ -1,17 +1,21 @@
 # maison : un service hébergé à la maison, publié sur Internet.
 #
 # Le service n'a aucun port ouvert chez lui. Nginx le joint à travers le
-# VPN, par son nom MagicDNS, et ne laisse passer que ceux qu'Authelia
-# reconnaît, second facteur compris.
+# VPN, par son nom MagicDNS, et ne laisse passer que les comptes Google de
+# l'équipe.
 server {
     listen 443 ssl;
     http2 on;
     server_name maison.${DOMAINE};
     include /etc/nginx/extraits/tls.conf;
-    include /etc/nginx/extraits/authelia-point.conf;
+    include /etc/nginx/extraits/google-point.conf;
+
+    location @connexion {
+        return 302 https://auth.${DOMAINE}/oauth2/start?rd=$scheme://$host$request_uri;
+    }
 
     location / {
-        include /etc/nginx/extraits/authelia-verifier.conf;
+        include /etc/nginx/extraits/google-verifier.conf;
         include /etc/nginx/extraits/proxy.conf;
 
         # 100.100.100.100 : le résolveur du VPN, servi par tailscaled.

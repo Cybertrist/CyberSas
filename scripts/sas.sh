@@ -18,10 +18,13 @@ set -euo pipefail
 # Sous Git Bash, sans cela, « /CN=... » et « /secrets » deviendraient des
 # chemins Windows.
 export MSYS_NO_PATHCONV=1
+# Pour la même raison, curl sous Windows ne connaît pas /dev/null.
+NUL=/dev/null; [ -n "${MSYSTEM:-}" ] && NUL=NUL
 
 RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$RACINE"
-ETAT="$RACINE/etat"
+# Relatif : openssl sous Git Bash ne lit pas les chemins /c/...
+ETAT="etat"
 AUTHELIA_IMAGE="authelia/authelia:4.39.28"
 LABO=(docker compose -f labo/maison.yaml)
 
@@ -209,7 +212,9 @@ cmd_labo () {
 cmd_essai () {
   charger_env
   ECHECS=0
-  local c=(curl -s -o /dev/null -w '%{http_code}' --max-time 10 --cacert "$ETAT/ca/public/cybersas-ca.pem")
+  # --ssl-no-revoke : le curl de Windows (Schannel) exige sinon une liste de
+  # révocation que l'autorité du labo ne publie pas. Ignoré ailleurs.
+  local c=(curl -s -o "$NUL" -w '%{http_code}' --max-time 10 --ssl-no-revoke --cacert "$ETAT/ca/public/cybersas-ca.pem")
   local r="--resolve"
   local code
 
@@ -223,10 +228,10 @@ cmd_essai () {
   code="$("${c[@]}" $r "maison.$DOMAINE:$PORT_HTTPS:127.0.0.1" "https://maison.$DOMAINE:$PORT_HTTPS/" || true)"
   [ "$code" = 302 ] && ok "maison.$DOMAINE renvoie vers la connexion (302)" || rate "maison.$DOMAINE sans session : $code, 302 attendu"
 
-  code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "inconnu.test:$PORT_HTTPS:127.0.0.1" "https://inconnu.test:$PORT_HTTPS/" || true)"
+  code="$(curl -sk -o "$NUL" -w '%{http_code}' --max-time 5 --resolve "inconnu.test:$PORT_HTTPS:127.0.0.1" "https://inconnu.test:$PORT_HTTPS/" || true)"
   [ "$code" = 000 ] && ok "un nom inconnu n'obtient même pas de certificat" || rate "nom inconnu : $code, coupure attendue"
 
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --resolve "hs.$DOMAINE:${PORT_HTTP:-80}:127.0.0.1" "http://hs.$DOMAINE:${PORT_HTTP:-80}/" || true)"
+  code="$(curl -s -o "$NUL" -w '%{http_code}' --max-time 5 --resolve "hs.$DOMAINE:${PORT_HTTP:-80}:127.0.0.1" "http://hs.$DOMAINE:${PORT_HTTP:-80}/" || true)"
   [ "$code" = 301 ] && ok "le HTTP en clair est redirigé" || rate "HTTP : $code, 301 attendu"
 
   dit "Dans le VPN"
@@ -234,8 +239,13 @@ cmd_essai () {
   maison="$("${LABO[@]}" exec -T poste tailscale ip -4 maison 2>/dev/null | tr -d '\r' || true)"
   [ -n "$maison" ] && ok "le poste voit maison ($maison)" || rate "le poste ne trouve pas maison"
 
-  if docker compose exec -T relais wget -qO- -T 5 http://maison.sas.internal/ 2>/dev/null | grep -q Hostname; then
-    ok "le relais atteint le service de la maison par son nom"
+  # Le relais garde le DNS de Docker : son nom VPN se demande au résolveur du
+  # VPN, comme le fait Nginx.
+  local nom
+  nom="$(docker compose exec -T relais nslookup maison.sas.internal 100.100.100.100 2>/dev/null \
+         | sed -n 's/^Address: *\(100\.[0-9.]*\).*/\1/p' | head -1)"
+  if [ -n "$nom" ] && docker compose exec -T relais wget -qO- -T 5 "http://$nom/" 2>/dev/null | grep -q Hostname; then
+    ok "le relais trouve maison.sas.internal ($nom) et atteint son service"
   else rate "le relais n'atteint pas maison.sas.internal"; fi
 
   if "${LABO[@]}" exec -T poste wget -qO- -T 5 "http://$maison/" 2>/dev/null | grep -q Hostname; then
@@ -252,6 +262,23 @@ cmd_essai () {
      || "${LABO[@]}" exec -T maison ping -c1 -W3 "$poste" >/dev/null 2>&1; then
     rate "maison atteint le poste : elle ne devrait rien pouvoir ouvrir"
   else ok "maison ne peut pas se retourner vers le poste"; fi
+
+  dit "Rejoindre le VPN"
+  # Un appareil neuf, sans clé : Headscale doit l'envoyer chez Authelia.
+  docker run -d --rm --name sas-essai-oidc --network cybersas_public --cap-add NET_ADMIN \
+    --device /dev/net/tun -e SSL_CERT_DIR=/etc/ssl/certs:/ca -v "$(cd "$ETAT/ca/public" && pwd -W 2>/dev/null || pwd):/ca:ro" \
+    tailscale/tailscale:v1.102.4 tailscaled --state=mem: >/dev/null
+  sleep 3
+  local url loc
+  url="$(docker exec sas-essai-oidc tailscale up --login-server="https://hs.$DOMAINE" --accept-dns=false --timeout=8s 2>&1 \
+         | grep -o "https://hs\.$DOMAINE/register/[^ ]*" | head -1 || true)"
+  docker rm -f sas-essai-oidc >/dev/null 2>&1 || true
+  loc="$(curl -s -D - -o "$NUL" --max-time 10 --ssl-no-revoke --cacert "$ETAT/ca/public/cybersas-ca.pem" \
+         --resolve "hs.$DOMAINE:$PORT_HTTPS:127.0.0.1" "${url/hs.$DOMAINE/hs.$DOMAINE:$PORT_HTTPS}" 2>/dev/null \
+         | tr -d '\r' | sed -n 's/^[Ll]ocation: //p')"
+  if [[ "$loc" == "https://auth.$DOMAINE/api/oidc/authorization?"*"code_challenge_method=S256"* ]]; then
+    ok "un nouvel appareil est envoyé chez Authelia, avec PKCE"
+  else rate "pas de renvoi vers Authelia (${loc:-rien})"; fi
 
   echo
   [ "$ECHECS" -eq 0 ] && dit "Tout est conforme." || meurt "$ECHECS vérification(s) en échec."

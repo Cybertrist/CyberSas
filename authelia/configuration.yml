@@ -22,6 +22,12 @@ log:
   level: info
   format: json
 
+# Authelia n'a pas de sortie vers Internet : elle ne peut pas comparer son
+# heure à un serveur NTP. Elle prend celle de la machine, qui doit donc
+# être à l'heure, sinon les codes TOTP sont refusés.
+ntp:
+  disable_startup_check: true
+
 totp:
   issuer: 'CyberSas'
 

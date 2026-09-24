@@ -42,7 +42,7 @@ derp:
 disable_check_updates: true
 
 node:
-  # Un appareil doit repasser par Authelia tous les 30 jours.
+  # Un appareil doit repasser par Google tous les 30 jours.
   expiry: 30d
   ephemeral:
     inactivity_timeout: 30m

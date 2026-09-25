@@ -340,8 +340,11 @@ class Reseau extends ChangeNotifier {
   /// Le temps que met le tunnel de l'accueil à s'allumer ou s'éteindre.
   static const dureeTransition = Duration(milliseconds: 3200);
 
+  /// Sur le vrai réseau, cet appareil n'est pas (encore) signé par le verrou.
+  bool get nonSigne => reel && !moi.signe;
+
   void basculer(bool v) {
-    if (v == connecte || enTransition) return;
+    if (v == connecte || enTransition || (v && nonSigne)) return;
     if (reel) {
       _basculerReel(v);
       return;
@@ -683,7 +686,7 @@ String duree(Duration d) {
 }
 
 /// La version affichée dans « À propos » (même valeur que pubspec.yaml).
-const versionAppli = '0.5.2';
+const versionAppli = '0.5.3';
 
 /// « tristan.joncour@gmail.com » → « Tristan » : de quoi nommer quelqu'un
 /// sans son nom complet.

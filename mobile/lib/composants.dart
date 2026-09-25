@@ -716,7 +716,7 @@ class SansDefilement extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, c) => MediaQuery.viewInsetsOf(context).bottom > 0
+    builder: (context, c) => View.of(context).viewInsets.bottom > 0
         // Clavier ouvert, la hauteur fond : réduire rendrait tout
         // minuscule. On défile, à taille normale.
         ? SingleChildScrollView(

@@ -172,7 +172,11 @@ class _CarteEtat extends StatelessWidget {
   Widget build(BuildContext context) {
     final on = r.connecte;
     final attente = r.enTransition;
+    // Pas encore signé par l'admin : les autres appareils le refuseraient,
+    // l'interrupteur reste fermé à clé.
+    final bloque = r.nonSigne && !on;
     final (etat, sous) = switch ((on, attente)) {
+      (false, false) when bloque => ('Verrouillé', 'en attente de signature'),
       (true, true) => ('Connexion…', 'ouverture du tunnel'),
       (false, true) => ('Coupure…', 'fermeture du tunnel'),
       // Tunnel ouvert, mais pas encore de session avec le serveur.
@@ -219,7 +223,11 @@ class _CarteEtat extends StatelessWidget {
               ]),
             ]),
           ),
-          Interrupteur(valeur: on, onChanged: attente ? null : r.basculer, largeur: grand ? 56 : 54, hauteur: grand ? 34 : 32),
+          if (bloque) ...[
+            const Icone(Ico.cadenas, couleur: Couleurs.tertiaire, taille: 18),
+            const SizedBox(width: 2),
+          ],
+          Interrupteur(valeur: on, onChanged: attente || bloque ? null : r.basculer, largeur: grand ? 56 : 54, hauteur: grand ? 34 : 32),
         ]),
       ),
     );

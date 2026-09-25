@@ -220,6 +220,53 @@ class _Securite extends StatelessWidget {
     messager.showSnackBar(SnackBar(content: Text(e ?? 'Clé du verrou rangée : ce téléphone peut signer.')));
   }
 
+  /// Retirer la clé du verrou de ce téléphone : il ne pourra plus signer.
+  /// La clé elle-même reste sur le serveur du verrou (etat/verrou/cle).
+  Future<void> _retirerVerrou(BuildContext context) async {
+    final messager = ScaffoldMessenger.of(context);
+    final oui = await showDialog<bool>(
+      context: context,
+      barrierColor: const Color(0xA8020407),
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Bordee(
+            bordure: Bords.accent(Couleurs.rouge),
+            fond: const Color(0xFF0A1119),
+            rayon: 24,
+            padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Retirer la clé du verrou ?', style: texte(20, graisse: 600, espacement: -0.4)),
+              const SizedBox(height: 8),
+              Text(
+                "Ce téléphone ne pourra plus signer les nouveaux appareils. Tu restes admin et sur le réseau ; pour signer à nouveau, il faudra ranger la clé une autre fois.",
+                style: texte(14, couleur: Couleurs.secondaire, hauteur: 1.4),
+              ),
+              const SizedBox(height: 20),
+              Row(children: [
+                Expanded(child: BoutonFantome(libelle: 'Annuler', onTap: () => Navigator.pop(context, false))),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: BoutonFantome(
+                    libelle: 'Retirer',
+                    couleur: Couleurs.rougeClair,
+                    bord: Couleurs.rouge.withValues(alpha: 0.45),
+                    onTap: () => Navigator.pop(context, true),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
+    if (oui != true) return;
+    await r.oublierVerrou();
+    messager.showSnackBar(const SnackBar(content: Text('Clé du verrou retirée de ce téléphone.')));
+  }
+
   Future<void> _ecran(bool v) async {
     await r.reglerEcran(v);
     await masquerEcran(v);
@@ -247,10 +294,10 @@ class _Securite extends StatelessWidget {
             ico: Ico.puce,
             libelle: 'Clé du verrou',
             sousTitre: !r.reel || r.cleVerrouPresente
-                ? "Elle signe les nouveaux appareils. Elle est gardée dans la puce du téléphone et ne sert qu'après ton empreinte."
+                ? "Elle signe les nouveaux appareils, gardée dans la puce du téléphone, après ton empreinte.${r.reel ? " Touche ici pour la retirer." : ""}"
                 : "Pas encore sur ce téléphone : touche ici pour la ranger.",
-            fin: r.reel && !r.cleVerrouPresente ? const Chevron() : null,
-            onTap: r.reel && !r.cleVerrouPresente ? () => _importerVerrou(context) : null,
+            fin: r.reel ? const Chevron() : null,
+            onTap: !r.reel ? null : r.cleVerrouPresente ? () => _retirerVerrou(context) : () => _importerVerrou(context),
             separateur: false,
             dense: true,
           ),

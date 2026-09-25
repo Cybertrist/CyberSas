@@ -269,7 +269,7 @@ class _CarteAppareil extends StatelessWidget {
               child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 const Etiquette('Cet appareil'),
                 const SizedBox(height: 5),
-                Text(moi.nom,
+                Text(moi.nomAffiche,
                     style: texte(grand ? 15 : 14, graisse: 500), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right),
               ]),
             ),

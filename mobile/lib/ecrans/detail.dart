@@ -59,7 +59,7 @@ class PanneauDetail extends StatelessWidget {
   Widget build(BuildContext context) {
     final fil = Row(children: [
       const Etiquette('Appareils / '),
-      Flexible(child: Etiquette(a.nom, couleur: Couleurs.texte)),
+      Flexible(child: Etiquette(a.nomAffiche, couleur: Couleurs.texte)),
     ]);
     final bouton = a.ports.isNotEmpty ? _BoutonOuvrir(a: a) : null;
     // Rien n'est étiré pour remplir la hauteur : le panneau défile si le
@@ -167,7 +167,7 @@ class _Identite extends StatelessWidget {
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Text(a.nom, style: titre(compact ? 22 : (grand ? 28 : 30)), maxLines: 1),
+                  child: Text(a.nomAffiche, style: titre(compact ? 22 : (grand ? 28 : 30)), maxLines: 1),
                 ),
               ),
               if (r.peutRenommer(a)) ...[
@@ -231,8 +231,10 @@ class _Grille extends StatelessWidget {
           'Nom',
           Text.rich(
             TextSpan(children: [
-              TextSpan(text: a.nom, style: mono(14.5, graisse: 400)),
-              TextSpan(text: '.sas.internal', style: mono(14.5, graisse: 400, couleur: Couleurs.cyan)),
+              TextSpan(text: a.nomAffiche, style: mono(14.5, graisse: 400)),
+              // Accolé au nom court, le nom DNS serait faux : seulement quand
+              // le nom est complet (machines, démo).
+              if (a.nomAffiche == a.nom) TextSpan(text: '.sas.internal', style: mono(14.5, graisse: 400, couleur: Couleurs.cyan)),
             ]),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,

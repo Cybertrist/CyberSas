@@ -594,7 +594,8 @@ class _PeintreTopologie extends CustomPainter {
     // lien vers le centre le barrerait.
     final dessus = p.dy < c.dy - 1;
     // Sur la carte, un nom long se raccourcit : « sdk-gphone64-x8… ».
-    final nom = a.nom.length > 16 ? '${a.nom.substring(0, 15)}…' : a.nom;
+    final n = a.nomAffiche;
+    final nom = n.length > 16 ? '${n.substring(0, 15)}…' : n;
     _texte(canvas, nom, a.fin, Offset(p.dx, dessus ? p.dy - 10 : p.dy + 10), TextAlign.center, lumiere, dessus: dessus);
   }
 

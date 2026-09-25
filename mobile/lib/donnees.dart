@@ -55,7 +55,19 @@ class Appareil {
     this.ports = const [],
     this.signe = true,
     this.raison = '',
+    this.suffixeReseau = '',
   });
+
+  /// Le suffixe que le serveur ajoute au nom d'un appareil personnel
+  /// (« -tristanjoncour29 ») : il empêche de se faire passer pour une machine,
+  /// mais n'a pas à s'afficher.
+  final String suffixeReseau;
+
+  /// Le nom à afficher : sans le suffixe du propriétaire.
+  String get nomAffiche =>
+      suffixeReseau.isNotEmpty && nom.endsWith(suffixeReseau) && nom.length > suffixeReseau.length
+          ? nom.substring(0, nom.length - suffixeReseau.length)
+          : nom;
 
   /// Son certificat est valide pour ce téléphone. Sinon, [raison] dit
   /// pourquoi il est écarté (pas encore signé, expiré, révoqué).
@@ -95,6 +107,7 @@ class Appareil {
         ports: ports,
         signe: signe,
         raison: raison,
+        suffixeReseau: suffixeReseau,
       );
 
   /// Un appareil tel que le moteur le décrit (pont.Pair).
@@ -120,6 +133,8 @@ class Appareil {
       moi: j['moi'] == true,
       signe: j['signe'] != false,
       raison: j['raison'] as String? ?? '',
+      // Même règle que NomPersonnel côté serveur.
+      suffixeReseau: email.isEmpty || serveur || etiquette.isNotEmpty ? '' : '-${nomPropre(email.split('@').first)}',
       certificat: Certificat(
         // Le verrou signe pour 90 jours par défaut.
         debut: (expire ?? DateTime.now()).subtract(const Duration(days: 90)),
@@ -357,6 +372,7 @@ class Reseau extends ChangeNotifier {
       adresse: i['adresse'] as String? ?? '',
       type: TypeAppareil.telephone,
       proprietaire: compte.toLowerCase(),
+      suffixeReseau: '-${nomPropre((i['proprietaire'] as String? ?? '').split('@').first)}',
       moi: true,
       enLigne: true,
       signe: false,
@@ -520,7 +536,7 @@ String duree(Duration d) {
 }
 
 /// La version affichée dans « À propos » (même valeur que pubspec.yaml).
-const versionAppli = '0.4.0';
+const versionAppli = '0.4.1';
 
 /// « tristan.joncour@gmail.com » → « Tristan » : de quoi nommer quelqu'un
 /// sans son nom complet.

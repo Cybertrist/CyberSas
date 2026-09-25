@@ -101,7 +101,7 @@ class _CetAppareil extends StatelessWidget {
       LigneReglage(
         ico: Ico.etiquette,
         libelle: 'Nom',
-        valeur: moi.nom,
+        valeur: moi.nomAffiche,
         fin: r.peutRenommer(moi) ? const Chevron() : null,
         onTap: r.peutRenommer(moi) ? () => renommerAppareil(context, moi) : null,
         dense: true,

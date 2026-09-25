@@ -252,7 +252,7 @@ class _Ligne extends StatelessWidget {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   Flexible(
-                    child: Text(a.nom,
+                    child: Text(a.nomAffiche,
                         style: texte(15, graisse: 600, couleur: a.enLigne ? Couleurs.texte : Couleurs.secondaire),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis),

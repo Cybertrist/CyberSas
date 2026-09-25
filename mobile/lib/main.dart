@@ -49,22 +49,26 @@ class CyberSas extends StatelessWidget {
           title: 'CyberSas',
           debugShowCheckedModeBanner: false,
           theme: themeCyberSas(),
+          // Le verrou passe au-dessus de tout, fenêtres comprises : une fenêtre
+          // ouverte (l'import de la clé) reste en dessous et se retrouve après
+          // l'empreinte.
+          builder: (context, enfant) => _Garde(child: enfant!),
           home: const _Racine(),
         ),
       );
 }
 
-/// Pas encore de réseau : l'écran de connexion. Sinon, l'appli, derrière
-/// l'écran de verrouillage si on l'a demandé.
-class _Racine extends StatefulWidget {
-  const _Racine();
+/// L'écran de verrouillage, en calque sur toute l'appli : au lancement si
+/// le réglage est actif, et au retour après plus de 30 s ailleurs.
+class _Garde extends StatefulWidget {
+  const _Garde({required this.child});
+  final Widget child;
 
   @override
-  State<_Racine> createState() => _RacineState();
+  State<_Garde> createState() => _GardeState();
 }
 
-class _RacineState extends State<_Racine> with WidgetsBindingObserver {
-  /// Au lancement, l'appli est verrouillée si le réglage est actif.
+class _GardeState extends State<_Garde> with WidgetsBindingObserver {
   late bool _verrouillee = EtatReseau.of(context).verrouAppli;
   DateTime? _partie;
 
@@ -84,6 +88,49 @@ class _RacineState extends State<_Racine> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState etat) {
+    if (etat == AppLifecycleState.hidden || etat == AppLifecycleState.paused) {
+      _partie ??= DateTime.now();
+    } else if (etat == AppLifecycleState.resumed) {
+      final partie = _partie;
+      _partie = null;
+      if (partie != null && EtatReseau.of(context).verrouAppli && DateTime.now().difference(partie) > _grace) {
+        // Le clavier se referme : il ne pousse pas l'écran de verrouillage.
+        FocusManager.instance.primaryFocus?.unfocus();
+        setState(() => _verrouillee = true);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = EtatReseau.of(context);
+    final verrou = _verrouillee && r.verrouAppli && r.inscrit;
+    return Stack(children: [
+      // Sous le verrou, rien ne répond au toucher ni au lecteur d'écran.
+      ExcludeSemantics(excluding: verrou, child: IgnorePointer(ignoring: verrou, child: widget.child)),
+      if (verrou)
+        Positioned.fill(
+          child: MediaQuery.removeViewInsets(
+            context: context,
+            removeBottom: true,
+            child: EcranVerrou(deverrouiller: () => setState(() => _verrouillee = false)),
+          ),
+        ),
+    ]);
+  }
+}
+
+/// Pas encore de réseau : l'écran de connexion. Sinon, l'appli.
+class _Racine extends StatefulWidget {
+  const _Racine();
+
+  @override
+  State<_Racine> createState() => _RacineState();
+}
+
+class _RacineState extends State<_Racine> {
   bool? _petitEcran;
 
   /// Sur un petit écran (téléphone, écran extérieur du Fold), l'appli reste
@@ -101,26 +148,11 @@ class _RacineState extends State<_Racine> with WidgetsBindingObserver {
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState etat) {
-    if (etat == AppLifecycleState.hidden || etat == AppLifecycleState.paused) {
-      _partie ??= DateTime.now();
-    } else if (etat == AppLifecycleState.resumed) {
-      final partie = _partie;
-      _partie = null;
-      if (partie != null && EtatReseau.of(context).verrouAppli && DateTime.now().difference(partie) > _grace) {
-        setState(() => _verrouillee = true);
-      }
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
     final r = EtatReseau.of(context);
     final Widget ecran;
     if (!r.inscrit) {
       ecran = const EcranConnexion();
-    } else if (_verrouillee && r.verrouAppli) {
-      ecran = EcranVerrou(deverrouiller: () => setState(() => _verrouillee = false));
     } else {
       ecran = const Coquille();
     }

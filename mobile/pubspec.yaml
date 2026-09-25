@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # Incrémenter à chaque APK envoyé : Android refuse une mise à jour dont
 # le numéro n'augmente pas.
-version: 0.5.0+13
+version: 0.5.1+14
 
 environment:
   sdk: ^3.13.4

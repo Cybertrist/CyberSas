@@ -73,9 +73,17 @@ func Appareils(dossier string) (string, error) {
 // de etat/verrou/cle). Elle doit aller avec le verrou que cet appareil a
 // retenu à l'inscription : sinon, ses signatures ne vaudraient rien.
 func lireVerrou(dossier, graine string) (ed25519.PrivateKey, error) {
-	g, err := b64.Decoder(strings.TrimSpace(graine))
+	// Un copier-coller emporte souvent un espace, un retour à la ligne ou
+	// des guillemets : on ne garde que l'alphabet du base64.
+	propre := strings.Map(func(r rune) rune {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '+' || r == '/' || r == '=' {
+			return r
+		}
+		return -1
+	}, graine)
+	g, err := b64.Decoder(propre)
 	if err != nil || len(g) != ed25519.SeedSize {
-		return nil, errors.New("clé du verrou illisible")
+		return nil, fmt.Errorf("clé du verrou illisible : %d caractères reçus, 44 attendus", len(propre))
 	}
 	prive := ed25519.NewKeyFromSeed(g)
 	e, err := appareil.Stockage{Dossier: dossier}.Lire()

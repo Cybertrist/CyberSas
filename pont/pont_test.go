@@ -1,14 +1,17 @@
 package pont
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Cybertrist/CyberSas/internal/appareil"
 	"github.com/Cybertrist/CyberSas/internal/client"
 	"github.com/Cybertrist/CyberSas/internal/protocole"
+	"github.com/Cybertrist/CyberSas/internal/verrou"
 )
 
 func lireVue(t *testing.T, s string) Vue {
@@ -71,5 +74,26 @@ func TestVueErreur(t *testing.T) {
 	v := lireVue(t, vueJSON(appareil.Vue{Erreur: errors.New("serveur\x1b[31m injoignable")}, true, "", time.Now()))
 	if v.Erreur != "serveur?[31m injoignable" {
 		t.Errorf("erreur : %q", v.Erreur)
+	}
+}
+
+// Une clé collée avec des espaces, un retour à la ligne ou des guillemets
+// passe ; une clé tronquée dit combien de caractères sont arrivés.
+func TestVerrouColle(t *testing.T) {
+	dossier := t.TempDir()
+	pub, prive, _ := verrou.Generer()
+	if err := (appareil.Stockage{Dossier: dossier}).Ecrire(appareil.Etat{Retenu: client.Retenu{Verrou: base64.StdEncoding.EncodeToString(pub)}}); err != nil {
+		t.Fatal(err)
+	}
+	graine := base64.StdEncoding.EncodeToString(prive.Seed())
+	if _, err := VerifierVerrou(dossier, " \"\n"+graine[:20]+" "+graine[20:]+"\r\n\" "); err != nil {
+		t.Errorf("clé collée avec des espaces : %v", err)
+	}
+	if _, err := VerifierVerrou(dossier, graine[:30]); err == nil || !strings.Contains(err.Error(), "30 caractères") {
+		t.Errorf("clé tronquée : %v", err)
+	}
+	_, autre, _ := verrou.Generer()
+	if _, err := VerifierVerrou(dossier, base64.StdEncoding.EncodeToString(autre.Seed())); err == nil {
+		t.Error("une autre clé que celle du verrou a été acceptée")
 	}
 }

@@ -43,6 +43,7 @@ func api(serveur, autorite string) (*client.API, error) {
 // Infos : ce que l'appli affiche d'une inscription.
 type Infos struct {
 	Nom          string `json:"nom"`
+	Libelle      string `json:"libelle"`
 	Adresse      string `json:"adresse"`
 	Reseau       string `json:"reseau"`
 	Serveur      string `json:"serveur"`
@@ -57,7 +58,7 @@ type Infos struct {
 
 func infos(e appareil.Etat) string {
 	a := e.Inscription.Appareil
-	b, _ := json.Marshal(Infos{Nom: client.Propre(a.Nom), Adresse: e.Retenu.Moi.String(), Reseau: e.Retenu.Reseau.String(),
+	b, _ := json.Marshal(Infos{Nom: client.Propre(a.Nom), Libelle: client.Propre(a.Libelle), Adresse: e.Retenu.Moi.String(), Reseau: e.Retenu.Reseau.String(),
 		Serveur: e.Serveur, Domaine: e.Inscription.Domaine, Proprietaire: client.Propre(a.Proprietaire), Groupe: client.Propre(a.Groupe),
 		Empreinte: client.EmpreinteCle(e.Retenu.MaCle), Verrou: client.EmpreinteVerrou(e.Retenu.Verrou)})
 	return string(b)
@@ -199,6 +200,7 @@ func Arreter() {
 // Pair : un appareil du réseau, tel que l'appli l'affiche.
 type Pair struct {
 	Nom          string    `json:"nom"`
+	Libelle      string    `json:"libelle,omitempty"`
 	Adresse      string    `json:"adresse"`
 	Proprietaire string    `json:"proprietaire"`
 	Etiquette    string    `json:"etiquette"`
@@ -208,6 +210,7 @@ type Pair struct {
 	Moi          bool      `json:"moi"`
 	Serveur      bool      `json:"serveur"`
 	Empreinte    string    `json:"empreinte"`
+	Cle          string    `json:"cle"`
 	Expire       time.Time `json:"expire,omitzero"`
 	// Signe : son certificat est valide pour ce client. Sinon, Raison dit
 	// pourquoi il est écarté.
@@ -268,9 +271,9 @@ func vueJSON(v appareil.Vue, marche bool, errMarche string, maintenant time.Time
 	vers := func(a protocole.Appareil, moi bool) Pair {
 		pub, _ := cle32(a.ClePublique)
 		raison, ecarte := refus[a.Adresse]
-		return Pair{Nom: client.Propre(a.Nom), Adresse: a.Adresse, Proprietaire: client.Propre(a.Proprietaire),
+		return Pair{Nom: client.Propre(a.Nom), Libelle: client.Propre(a.Libelle), Adresse: a.Adresse, Proprietaire: client.Propre(a.Proprietaire),
 			Etiquette: client.Propre(a.Etiquette), Groupe: client.Propre(a.Groupe), Systeme: client.Propre(a.Systeme),
-			EnLigne: a.EnLigne || moi, Moi: moi, Empreinte: client.EmpreinteCle(a.ClePublique), Expire: a.SignatureExpire,
+			EnLigne: a.EnLigne || moi, Moi: moi, Empreinte: client.EmpreinteCle(a.ClePublique), Cle: a.ClePublique, Expire: a.SignatureExpire,
 			Signe: !ecarte, Raison: raison, Session: sessions[pub]}
 	}
 	if r.Moi.Adresse != "" {

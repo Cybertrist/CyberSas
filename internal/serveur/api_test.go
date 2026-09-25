@@ -198,6 +198,9 @@ func TestReseauNeMontreQueLesPairsRelies(t *testing.T) {
 	if len(etat.Pairs) != 1 || etat.Pairs[0].Nom != "maison" {
 		t.Fatalf("alice devrait voir la maison, et seulement elle : %+v", etat.Pairs)
 	}
+	// Une variable neuve : décoder dans l'ancienne garderait les champs
+	// absents de la nouvelle réponse.
+	etat = protocole.EtatReseau{}
 	b.appel("GET", protocole.CheminReseau, maison.Jeton, nil, &etat)
 	if len(etat.Pairs) != 1 || etat.Pairs[0].Nom != "portable-alice" {
 		t.Fatalf("la maison devrait voir le portable d'alice : %+v", etat.Pairs)

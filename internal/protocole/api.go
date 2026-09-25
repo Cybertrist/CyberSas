@@ -17,7 +17,30 @@ const (
 	// CheminServeur rend la clé publique du serveur, pour calculer la
 	// preuve de possession avant de s'inscrire.
 	CheminServeur = "/api/v1/serveur"
+	// CheminLibelle : changer le nom affiché de son appareil (un admin :
+	// de n'importe lequel).
+	CheminLibelle = "/api/v1/libelle"
+
+	// Pour les admins seulement : la liste des appareils, signés ou non,
+	// les signatures faites sur le téléphone de l'admin, et le refus d'un
+	// appareil. Le serveur ne signe jamais : il vérifie ce qu'on lui donne
+	// avec la clé publique du verrou, et un certificat faux est refusé.
+	CheminAppareils  = "/api/v1/appareils"
+	CheminSignatures = "/api/v1/signatures"
+	CheminRetrait    = "/api/v1/retrait"
 )
+
+// DemandeLibelle : le nouveau nom affiché. ClePublique désigne un autre
+// appareil que le sien (admin seulement) ; vide, c'est le sien.
+type DemandeLibelle struct {
+	ClePublique string `json:"cle_publique,omitempty"`
+	Libelle     string `json:"libelle"`
+}
+
+// DemandeRetrait : l'appareil à retirer du réseau (une demande refusée).
+type DemandeRetrait struct {
+	ClePublique string `json:"cle_publique"`
+}
 
 // DemandeConnexion : l'un des deux justificatifs, jamais les deux. Un jeton
 // Google pour une personne, une clé d'inscription pour une machine.
@@ -56,6 +79,7 @@ type ReponseConnexion struct {
 type Appareil struct {
 	Numero      uint32 `json:"numero"`
 	Nom         string `json:"nom"`
+	Libelle     string `json:"libelle,omitempty"`
 	Adresse     string `json:"adresse"`
 	ClePublique string `json:"cle_publique,omitempty"`
 	Signature   string `json:"signature,omitempty"` // certificat du verrou

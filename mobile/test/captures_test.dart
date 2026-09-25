@@ -109,7 +109,8 @@ void main() {
   testWidgets('telephone verrou', (t) async {
     addTearDown(t.view.reset);
     await _ouvrir(t, _formats['telephone']!, Reseau(inscrit: true)..verrouAppli = true);
-    await _attendre(t, 800);
+    // L'entrée du logo, puis la demande d'empreinte (1,5 s).
+    await _attendre(t, 2000);
     await expectLater(find.byType(CyberSas), matchesGoldenFile('captures/telephone-verrou.png'));
   });
 

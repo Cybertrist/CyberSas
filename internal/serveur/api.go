@@ -26,6 +26,10 @@ func (s *Serveur) Routes() http.Handler {
 	mux.HandleFunc("POST "+protocole.CheminConnexion, s.connexion)
 	mux.HandleFunc("GET "+protocole.CheminReseau, s.reseau)
 	mux.HandleFunc("POST "+protocole.CheminDeconnexion, s.deconnexion)
+	mux.HandleFunc("POST "+protocole.CheminLibelle, s.libelle)
+	mux.HandleFunc("GET "+protocole.CheminAppareils, s.appareils)
+	mux.HandleFunc("POST "+protocole.CheminSignatures, s.signatures)
+	mux.HandleFunc("POST "+protocole.CheminRetrait, s.retrait)
 	mux.HandleFunc("GET "+protocole.CheminServeur, func(w http.ResponseWriter, _ *http.Request) {
 		repondre(w, http.StatusOK, s.infoServeur())
 	})
@@ -122,7 +126,10 @@ func (s *Serveur) connexion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a := base.Appareil{Nom: texteCourt(d.Nom, 30), ClePublique: d.ClePublique, Systeme: texteCourt(d.Systeme, 32)}
+	// Le nom proposé devient le libellé tel quel ; le nom sur le réseau en
+	// est tiré (minuscules, tirets), voir base.NomPropre.
+	a := base.Appareil{Nom: texteCourt(d.Nom, 30), Libelle: texteCourt(d.Nom, longueurLibelle), ClePublique: d.ClePublique,
+		Systeme: texteCourt(d.Systeme, 32)}
 	ins := base.Inscription{Jeton: jetonAleatoire()}
 	switch {
 	case d.JetonGoogle != "" && d.CleInscription != "":
@@ -206,7 +213,7 @@ func (s *Serveur) connexion(w http.ResponseWriter, r *http.Request) {
 func (s *Serveur) vers(a, demandeur base.Appareil, poignee time.Time) protocole.Appareil {
 	moi := a.ID == demandeur.ID
 	// #nosec G115 -- a.ID est borné par base.Enregistrer.
-	r := protocole.Appareil{Numero: uint32(a.ID), Nom: a.Nom, Adresse: a.Adresse.String(), ClePublique: a.ClePublique,
+	r := protocole.Appareil{Numero: uint32(a.ID), Nom: a.Nom, Libelle: a.Libelle, Adresse: a.Adresse.String(), ClePublique: a.ClePublique,
 		Etiquette: a.Etiquette, Moi: moi, EnLigne: !poignee.IsZero() && time.Since(poignee) < 3*time.Minute,
 		Groupe: a.SignatureGroupe, SignatureExpire: a.SignatureExpire}
 	if len(a.Signature) > 0 {
@@ -218,8 +225,14 @@ func (s *Serveur) vers(a, demandeur base.Appareil, poignee time.Time) protocole.
 	if moi || demandeur.Etiquette == "" || len(a.Signature) > 0 {
 		r.Proprietaire = a.Proprietaire
 	}
+	// Le système (android, linux) dit quelle icône montrer, aux appareils
+	// des personnes seulement : une machine n'a pas à savoir ce que les
+	// gens utilisent. L'expiration ne regarde que l'appareil lui-même.
+	if moi || demandeur.Etiquette == "" {
+		r.Systeme = a.Systeme
+	}
 	if moi {
-		r.Systeme, r.Expire = a.Systeme, a.Expire
+		r.Expire = a.Expire
 	}
 	return r
 }

@@ -366,19 +366,29 @@ class _BoutonOuvrir extends StatelessWidget {
 /// fixe : on ne change que ce qui le précède.
 Future<void> renommerAppareil(BuildContext context, Appareil a) async {
   final r = EtatReseau.of(context);
-  final champ = TextEditingController(text: a.prefixe);
+  // Sur le vrai réseau, on change le nom affiché, tel quel ; dans la démo,
+  // le nom lui-même, suffixe du propriétaire compris.
+  final libre = r.reel;
+  final champ = TextEditingController(text: libre ? a.nomAffiche : a.prefixe);
   String? erreur;
+  var enCours = false;
   await showDialog<void>(
     context: context,
     barrierColor: const Color(0xA8020407),
     builder: (context) => StatefulBuilder(
       builder: (context, maj) {
-        void valider() {
-          final e = r.renommer(r.appareil(a.nom), champ.text);
+        Future<void> valider() async {
+          if (enCours) return;
+          maj(() => enCours = true);
+          final e = await r.renommer(r.parAdresse(a.adresse), champ.text);
+          if (!context.mounted) return;
           if (e == null) {
             Navigator.pop(context);
           } else {
-            maj(() => erreur = e);
+            maj(() {
+              erreur = e;
+              enCours = false;
+            });
           }
         }
 
@@ -397,7 +407,9 @@ Future<void> renommerAppareil(BuildContext context, Appareil a) async {
                 Text('Renommer', style: texte(20, graisse: 600, espacement: -0.4)),
                 const SizedBox(height: 6),
                 Text(
-                  a.suffixe.isEmpty
+                  libre
+                      ? 'Le nom que tu verras partout, majuscules et espaces compris.'
+                      : a.suffixe.isEmpty
                       ? 'Lettres, chiffres et tirets : le nom sert aussi d\'adresse sur le réseau.'
                       : 'Le suffixe « ${a.suffixe} » reste : il dit à qui est l\'appareil.',
                   style: texte(13.5, couleur: Couleurs.secondaire, hauteur: 1.4),
@@ -406,14 +418,15 @@ Future<void> renommerAppareil(BuildContext context, Appareil a) async {
                 TextField(
                   controller: champ,
                   autofocus: true,
-                  maxLength: 30,
-                  style: mono(16, graisse: 400),
+                  maxLength: libre ? 40 : 30,
+                  textCapitalization: libre ? TextCapitalization.words : TextCapitalization.none,
+                  style: libre ? texte(16, graisse: 500) : mono(16, graisse: 400),
                   textInputAction: TextInputAction.done,
                   onChanged: (_) => maj(() => erreur = null),
                   onSubmitted: (_) => valider(),
                   decoration: InputDecoration(
                     counterText: '',
-                    suffixText: a.suffixe.isEmpty ? null : a.suffixe,
+                    suffixText: libre || a.suffixe.isEmpty ? null : a.suffixe,
                     suffixStyle: mono(16, graisse: 400, couleur: Couleurs.tertiaire),
                     filled: true,
                     fillColor: Couleurs.bloc,
@@ -424,7 +437,7 @@ Future<void> renommerAppareil(BuildContext context, Appareil a) async {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  erreur ?? '$apercu.sas.internal',
+                  erreur ?? (libre ? 'Ton nom sur le réseau ne change pas.' : '$apercu.sas.internal'),
                   style: erreur != null ? texte(13, couleur: Couleurs.rougeClair) : mono(12.5, graisse: 400, couleur: Couleurs.etiquette),
                 ),
                 const SizedBox(height: 18),

@@ -95,9 +95,10 @@ class _CarteDemande extends StatelessWidget {
               libelle: 'Refuser',
               couleur: Couleurs.rougeClair,
               bord: Couleurs.rouge.withValues(alpha: 0.4),
-              onTap: () {
-                r.traiter(d);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${d.nom} refusé')));
+              onTap: () async {
+                final messager = ScaffoldMessenger.of(context);
+                final e = await r.traiter(d);
+                messager.showSnackBar(SnackBar(content: Text(e ?? '${d.nom} refusé')));
               },
             ),
           ),
@@ -122,21 +123,27 @@ class _BoutonSigner extends StatefulWidget {
 class _BoutonSignerState extends State<_BoutonSigner> {
   bool _enCours = false;
 
-  // La vraie signature passera par une clé StrongBox liée à l'empreinte
-  // (setUserAuthenticationRequired) : elle n'est utilisable qu'une fois le
-  // doigt reconnu par cette même invite.
+  // La clé du verrou est dans le coffre du téléphone (Coffre.kt), sous une
+  // clé du Keystore qui ne sert que dans les secondes qui suivent cette
+  // empreinte : sans le doigt, pas de signature.
   Future<void> _signer() async {
     if (_enCours) return;
     final r = EtatReseau.of(context);
     final messager = ScaffoldMessenger.of(context);
     setState(() => _enCours = true);
     final d = widget.d;
+    if (r.reel && !r.cleVerrouPresente) {
+      setState(() => _enCours = false);
+      messager.showSnackBar(const SnackBar(
+        content: Text("La clé du verrou n'est pas sur ce téléphone : Réglages, Clé du verrou."),
+      ));
+      return;
+    }
     final identite = await confirmerIdentite('Signer ${d.nom} (${d.empreinte.join('-')})');
-    if (mounted) setState(() => _enCours = false);
     switch (identite) {
       case Identite.confirmee:
-        r.signer(d);
-        messager.showSnackBar(SnackBar(content: Text('${d.nom} signé : il rejoint le réseau')));
+        final e = await r.signer(d);
+        messager.showSnackBar(SnackBar(content: Text(e ?? '${d.nom} signé : il rejoint le réseau')));
       case Identite.impossible:
         messager.showSnackBar(const SnackBar(
           content: Text("Aucune empreinte enregistrée sur ce téléphone : ajoute-en une dans les réglages d'Android."),
@@ -144,6 +151,7 @@ class _BoutonSignerState extends State<_BoutonSigner> {
       case Identite.annulee:
         break;
     }
+    if (mounted) setState(() => _enCours = false);
   }
 
   @override

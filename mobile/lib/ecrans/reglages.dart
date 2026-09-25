@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../composants.dart';
 import '../donnees.dart';
@@ -144,6 +145,81 @@ class _Securite extends StatelessWidget {
     await r.reglerVerrou(v);
   }
 
+  /// La clé du verrou, collée ou tapée dans un champ masqué, est vérifiée
+  /// (elle doit être celle du verrou de ce réseau), puis rangée dans le
+  /// coffre après l'empreinte. Le presse-papiers est vidé.
+  Future<void> _importerVerrou(BuildContext context) async {
+    final messager = ScaffoldMessenger.of(context);
+    final champ = TextEditingController();
+    final saisie = await showDialog<String>(
+      context: context,
+      barrierColor: const Color(0xA8020407),
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Bordee(
+            bordure: Bords.reflet,
+            fond: const Color(0xFF0A1119),
+            rayon: 24,
+            padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Clé du verrou', style: texte(20, graisse: 600, espacement: -0.4)),
+              const SizedBox(height: 6),
+              Text(
+                "Colle la clé privée du verrou (le fichier etat/verrou/cle du serveur). Elle sera chiffrée dans la puce "
+                "du téléphone, et ne servira qu'après ton empreinte.",
+                style: texte(13.5, couleur: Couleurs.secondaire, hauteur: 1.4),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: champ,
+                autofocus: true,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                style: mono(15, graisse: 400),
+                decoration: InputDecoration(
+                  hintText: 'Clé en base64',
+                  hintStyle: mono(15, graisse: 400, couleur: Couleurs.tertiaire),
+                  filled: true,
+                  fillColor: Couleurs.bloc,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  suffixIcon: TextButton(
+                    onPressed: () async => champ.text = (await Clipboard.getData(Clipboard.kTextPlain))?.text?.trim() ?? '',
+                    child: Text('Coller', style: texte(13, graisse: 600, couleur: Couleurs.cyan)),
+                  ),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Couleurs.bordure)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Couleurs.cyan)),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(children: [
+                Expanded(child: BoutonFantome(libelle: 'Annuler', onTap: () => Navigator.pop(context))),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: BoutonFantome(
+                    libelle: 'Ranger',
+                    couleur: Couleurs.cyan,
+                    bord: Couleurs.cyan.withValues(alpha: 0.5),
+                    onTap: () => Navigator.pop(context, champ.text.trim()),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
+    Future<void>.delayed(const Duration(milliseconds: 400), champ.dispose);
+    if (saisie == null || saisie.isEmpty) return;
+    if (await confirmerIdentite('Ranger la clé du verrou') != Identite.confirmee) return;
+    final e = await r.importerVerrou(saisie);
+    await Clipboard.setData(const ClipboardData(text: ''));
+    messager.showSnackBar(SnackBar(content: Text(e ?? 'Clé du verrou rangée : ce téléphone peut signer.')));
+  }
+
   Future<void> _ecran(bool v) async {
     await r.reglerEcran(v);
     await masquerEcran(v);
@@ -167,10 +243,14 @@ class _Securite extends StatelessWidget {
           dense: true,
         ),
         if (r.admin)
-          const LigneReglage(
+          LigneReglage(
             ico: Ico.puce,
             libelle: 'Clé du verrou',
-            sousTitre: "Elle signe les nouveaux appareils. Elle est gardée dans la puce du téléphone et ne sert qu'après ton empreinte.",
+            sousTitre: !r.reel || r.cleVerrouPresente
+                ? "Elle signe les nouveaux appareils. Elle est gardée dans la puce du téléphone et ne sert qu'après ton empreinte."
+                : "Pas encore sur ce téléphone : touche ici pour la ranger.",
+            fin: r.reel && !r.cleVerrouPresente ? const Chevron() : null,
+            onTap: r.reel && !r.cleVerrouPresente ? () => _importerVerrou(context) : null,
             separateur: false,
             dense: true,
           ),

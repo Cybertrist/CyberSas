@@ -60,6 +60,45 @@ abstract final class Moteur {
     }
   }
 
+  static Future<T?> _appel<T>(String methode, [Map<String, dynamic>? args]) async {
+    try {
+      return await _canal.invokeMethod<T>(methode, args);
+    } on PlatformException catch (e) {
+      throw ErreurMoteur(e.message ?? e.code);
+    }
+  }
+
+  /// Le nom affiché d'un appareil : le sien si [cle] est vide.
+  static Future<void> libeller(String cle, String libelle) => _appel<void>('libeller', {'cle': cle, 'libelle': libelle});
+
+  /// L'état du réseau lu sur l'API, sans tunnel (même forme que [etat]).
+  static Future<Map<String, dynamic>> reseau() async =>
+      jsonDecode(await _appel<String>('reseau') ?? '{}') as Map<String, dynamic>;
+
+  /// Admin : tous les appareils du serveur, signés ou non (pont.Fiche).
+  static Future<List<Map<String, dynamic>>> appareils() async =>
+      (jsonDecode(await _appel<String>('appareils') ?? '[]') as List).cast<Map<String, dynamic>>();
+
+  /// La clé du verrou est dans le coffre de ce téléphone.
+  static Future<bool> verrouPresent() async {
+    try {
+      return await _canal.invokeMethod<bool>('coffrePresent') ?? false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// Range la clé du verrou dans le coffre. Juste après l'empreinte.
+  static Future<String> rangerVerrou(String graine) async => await _appel<String>('coffreRanger', {'graine': graine}) ?? '';
+
+  static Future<void> effacerVerrou() => _appel<void>('coffreEffacer');
+
+  /// Signe ces appareils avec la clé du coffre. Juste après l'empreinte.
+  static Future<int> signer(String cles) async => await _appel<int>('signer', {'cles': cles}) ?? 0;
+
+  /// Admin : retire un appareil du serveur.
+  static Future<void> retirer(String cle) => _appel<void>('retirer', {'cle': cle});
+
   /// Le nom du téléphone dans ses réglages (« Galaxy Z Fold8 »), sinon
   /// son modèle.
   static Future<String> nomAppareil() async {

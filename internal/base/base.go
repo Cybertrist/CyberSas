@@ -39,8 +39,12 @@ type Base struct {
 }
 
 type Appareil struct {
-	ID           int64
-	Nom          string
+	ID  int64
+	Nom string
+	// Libelle : le nom affiché, tel que la personne l'a écrit (« Z Fold8
+	// Tristan »). Nom, lui, sert d'adresse sur le réseau. Le libellé ne
+	// fait pas partie du certificat : le changer ne demande pas de signature.
+	Libelle      string
 	ClePublique  string
 	Adresse      netip.Addr
 	Proprietaire string // adresse Google, vide pour une machine
@@ -73,7 +77,8 @@ CREATE TABLE IF NOT EXISTS appareils (
 	jeton            BLOB,
 	signature        BLOB,
 	signature_groupe TEXT NOT NULL DEFAULT '',
-	signature_expire INTEGER NOT NULL DEFAULT 0
+	signature_expire INTEGER NOT NULL DEFAULT 0,
+	libelle          TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS cles (
 	empreinte   BLOB PRIMARY KEY,
@@ -102,6 +107,16 @@ func Ouvrir(chemin string) (*Base, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("schéma : %w", err)
 	}
+	// Une base créée avant le libellé : on ajoute la colonne.
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('appareils') WHERE name = 'libelle'`).Scan(&n); err != nil {
+		return nil, fmt.Errorf("schéma : %w", err)
+	}
+	if n == 0 {
+		if _, err := db.Exec(`ALTER TABLE appareils ADD COLUMN libelle TEXT NOT NULL DEFAULT ''`); err != nil {
+			return nil, fmt.Errorf("schéma : %w", err)
+		}
+	}
 	return &Base{db: db}, nil
 }
 
@@ -111,14 +126,14 @@ func Empreinte(s string) []byte {
 }
 
 const colonnes = `id, nom, cle_publique, adresse, proprietaire, etiquette, systeme, cree, vu, expire,
-	signature, signature_groupe, signature_expire`
+	signature, signature_groupe, signature_expire, libelle`
 
 func lire(r interface{ Scan(...any) error }) (Appareil, error) {
 	var a Appareil
 	var adresse string
 	var cree, vu, expire, sigExpire int64
 	if err := r.Scan(&a.ID, &a.Nom, &a.ClePublique, &adresse, &a.Proprietaire, &a.Etiquette, &a.Systeme,
-		&cree, &vu, &expire, &a.Signature, &a.SignatureGroupe, &sigExpire); err != nil {
+		&cree, &vu, &expire, &a.Signature, &a.SignatureGroupe, &sigExpire, &a.Libelle); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return a, ErrIntrouvable
 		}
@@ -159,6 +174,23 @@ func (b *Base) ParJeton(jeton string) (Appareil, error) {
 func (b *Base) Supprimer(id int64) error {
 	_, err := b.db.Exec(`DELETE FROM appareils WHERE id = ?`, id)
 	return err
+}
+
+// DefinirLibelle change le nom affiché d'un appareil.
+func (b *Base) DefinirLibelle(id int64, libelle string) error {
+	r, err := b.db.Exec(`UPDATE appareils SET libelle = ? WHERE id = ?`, libelle, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrIntrouvable
+	}
+	return nil
+}
+
+// ParCle : l'appareil qui a cette clé publique.
+func (b *Base) ParCle(cle string) (Appareil, error) {
+	return lire(b.db.QueryRow(`SELECT `+colonnes+` FROM appareils WHERE cle_publique = ?`, cle))
 }
 
 func (b *Base) SupprimerParNom(nom string) error {
@@ -257,7 +289,7 @@ func (b *Base) Enregistrer(ins Inscription, reseau netip.Prefix, serveur netip.A
 		if existant.Proprietaire != a.Proprietaire || existant.Etiquette != a.Etiquette {
 			return a, ErrAutreProprietaire
 		}
-		a.ID, a.Adresse, a.Cree, a.Nom = existant.ID, existant.Adresse, existant.Cree, existant.Nom
+		a.ID, a.Adresse, a.Cree, a.Nom, a.Libelle = existant.ID, existant.Adresse, existant.Cree, existant.Nom, existant.Libelle
 		a.Signature, a.SignatureGroupe, a.SignatureExpire = existant.Signature, existant.SignatureGroupe, existant.SignatureExpire
 		if _, err := tx.Exec(`UPDATE appareils SET systeme=?, vu=?, expire=?, jeton=? WHERE id=?`,
 			a.Systeme, now.Unix(), expire, Empreinte(ins.Jeton), a.ID); err != nil {
@@ -270,9 +302,9 @@ func (b *Base) Enregistrer(ins Inscription, reseau netip.Prefix, serveur netip.A
 		if a.Nom, err = choisirNom(tx, a, nomMachine); err != nil {
 			return a, err
 		}
-		r, err := tx.Exec(`INSERT INTO appareils (nom, cle_publique, adresse, proprietaire, etiquette, systeme, cree, vu, expire, jeton)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			a.Nom, a.ClePublique, a.Adresse.String(), a.Proprietaire, a.Etiquette, a.Systeme, now.Unix(), now.Unix(), expire, Empreinte(ins.Jeton))
+		r, err := tx.Exec(`INSERT INTO appareils (nom, cle_publique, adresse, proprietaire, etiquette, systeme, cree, vu, expire, jeton, libelle)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			a.Nom, a.ClePublique, a.Adresse.String(), a.Proprietaire, a.Etiquette, a.Systeme, now.Unix(), now.Unix(), expire, Empreinte(ins.Jeton), a.Libelle)
 		if err != nil {
 			return a, err
 		}

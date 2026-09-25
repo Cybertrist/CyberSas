@@ -85,6 +85,36 @@ class MainActivity : FlutterFragmentActivity() {
                         startActivityForResult(demande, AUTORISATION_VPN)
                     }
                 }
+                "libeller" -> {
+                    val cle = appel.argument<String>("cle") ?: ""
+                    val libelle = appel.argument<String>("libelle") ?: ""
+                    enArriere(reponse) { Pont.libeller(dossier.path, cle, libelle); null }
+                }
+                // Admin : les appareils, la clé du verrou, les signatures.
+                "appareils" -> enArriere(reponse) { Pont.appareils(dossier.path) }
+                // L'état du réseau par l'API, quand le tunnel est coupé.
+                "reseau" -> enArriere(reponse) { Pont.reseau(dossier.path) }
+                "coffrePresent" -> reponse.success(Coffre.present(this))
+                // Juste après l'empreinte : la clé collée est vérifiée, puis rangée.
+                "coffreRanger" -> {
+                    val graine = appel.argument<String>("graine") ?: ""
+                    enArriere(reponse) {
+                        val empreinte = Pont.verifierVerrou(dossier.path, graine)
+                        Coffre.ranger(this, graine)
+                        empreinte
+                    }
+                }
+                "coffreEffacer" -> { Coffre.effacer(this); reponse.success(null) }
+                // Juste après l'empreinte : la clé sort du coffre et va droit au
+                // moteur, sans passer par Flutter.
+                "signer" -> {
+                    val cles = appel.argument<String>("cles") ?: ""
+                    enArriere(reponse) { Pont.signer(dossier.path, Coffre.lire(this), cles) }
+                }
+                "retirer" -> {
+                    val cle = appel.argument<String>("cle") ?: ""
+                    enArriere(reponse) { Pont.retirer(dossier.path, cle); null }
+                }
                 "arreter" -> {
                     startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ARRET))
                     reponse.success(null)
@@ -93,6 +123,7 @@ class MainActivity : FlutterFragmentActivity() {
                     startService(Intent(this, TunnelService::class.java).setAction(TunnelService.ARRET))
                     enArriere(reponse) {
                         Pont.quitter(dossier.path)
+                        Coffre.effacer(this)
                         null
                     }
                 }

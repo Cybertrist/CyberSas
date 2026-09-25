@@ -56,7 +56,20 @@ class Appareil {
     this.signe = true,
     this.raison = '',
     this.suffixeReseau = '',
+    this.libelle = '',
+    this.cle = '',
+    this.groupe = '',
   });
+
+  /// Son groupe dans l'équipe, tel que le verrou l'a signé (« admins »).
+  final String groupe;
+
+  /// Le nom affiché choisi par la personne (« Z Fold8 Tristan »), s'il y
+  /// en a un. [nom] reste l'adresse sur le réseau.
+  final String libelle;
+
+  /// Sa clé publique, qui le désigne auprès du serveur.
+  final String cle;
 
   /// Le suffixe que le serveur ajoute au nom d'un appareil personnel
   /// (« -tristanjoncour29 ») : il empêche de se faire passer pour une machine,
@@ -64,8 +77,9 @@ class Appareil {
   final String suffixeReseau;
 
   /// Le nom à afficher : sans le suffixe du propriétaire.
-  String get nomAffiche =>
-      suffixeReseau.isNotEmpty && nom.endsWith(suffixeReseau) && nom.length > suffixeReseau.length
+  String get nomAffiche => libelle.isNotEmpty
+      ? libelle
+      : suffixeReseau.isNotEmpty && nom.endsWith(suffixeReseau) && nom.length > suffixeReseau.length
           ? nom.substring(0, nom.length - suffixeReseau.length)
           : nom;
 
@@ -96,6 +110,23 @@ class Appareil {
   /// La partie du nom qu'on peut changer.
   String get prefixe => suffixe.isNotEmpty && nom.endsWith(suffixe) ? nom.substring(0, nom.length - suffixe.length) : nom;
 
+  Appareil avecLibelle(String l) => Appareil(
+        nom: nom,
+        adresse: adresse,
+        type: type,
+        proprietaire: proprietaire,
+        certificat: certificat,
+        enLigne: enLigne,
+        moi: moi,
+        ports: ports,
+        signe: signe,
+        raison: raison,
+        suffixeReseau: suffixeReseau,
+        libelle: l,
+        cle: cle,
+        groupe: groupe,
+      );
+
   Appareil renomme(String nouveau) => Appareil(
         nom: nouveau,
         adresse: adresse,
@@ -108,6 +139,9 @@ class Appareil {
         signe: signe,
         raison: raison,
         suffixeReseau: suffixeReseau,
+        libelle: libelle,
+        cle: cle,
+        groupe: groupe,
       );
 
   /// Un appareil tel que le moteur le décrit (pont.Pair).
@@ -133,6 +167,9 @@ class Appareil {
       moi: j['moi'] == true,
       signe: j['signe'] != false,
       raison: j['raison'] as String? ?? '',
+      libelle: j['libelle'] as String? ?? '',
+      cle: j['cle'] as String? ?? '',
+      groupe: j['groupe'] as String? ?? '',
       // Même règle que NomPersonnel côté serveur.
       suffixeReseau: email.isEmpty || serveur || etiquette.isNotEmpty ? '' : '-${nomPropre(email.split('@').first)}',
       certificat: Certificat(
@@ -151,7 +188,10 @@ class Appareil {
 }
 
 class Demande {
-  const Demande({required this.nom, required this.compte, required this.type, required this.empreinte});
+  const Demande({required this.nom, required this.compte, required this.type, required this.empreinte, this.cle = ''});
+
+  /// Sa clé publique : c'est elle que l'admin signe.
+  final String cle;
 
   final String nom;
   final String compte;
@@ -354,6 +394,7 @@ class Reseau extends ChangeNotifier {
       return;
     }
     _adopterInscription(i);
+    cleVerrouPresente = await Moteur.verrouPresent();
     await _lireEtat();
     _suivi?.cancel();
     _suivi = Timer.periodic(const Duration(seconds: 2), (_) => _lireEtat());
@@ -369,6 +410,7 @@ class Reseau extends ChangeNotifier {
     cleVerrou = i['verrou'] as String? ?? '';
     _moiInscrit = Appareil(
       nom: i['nom'] as String? ?? '',
+      libelle: i['libelle'] as String? ?? '',
       adresse: i['adresse'] as String? ?? '',
       type: TypeAppareil.telephone,
       proprietaire: compte.toLowerCase(),
@@ -392,15 +434,31 @@ class Reseau extends ChangeNotifier {
     if (!enTransition) connecte = enMarche;
     serveurJoint = e['connecte'] == true;
     erreur = e['erreur'] as String? ?? '';
-    final pairs = (e['pairs'] as List? ?? []).cast<Map<String, dynamic>>();
+    var pairs = (e['pairs'] as List? ?? []).cast<Map<String, dynamic>>();
+    // Tunnel coupé : le moteur ne sait rien du réseau, on le demande à
+    // l'API (une fois sur trois, toutes les six secondes).
+    if (pairs.isEmpty && (_tours % 3 == 0 || appareils.isEmpty)) {
+      try {
+        pairs = ((await Moteur.reseau())['pairs'] as List? ?? []).cast<Map<String, dynamic>>();
+      } on ErreurMoteur {
+        // Serveur injoignable : on garde ce qu'on sait.
+      }
+    }
     if (pairs.isNotEmpty) {
       appareils
         ..clear()
         ..addAll(pairs.map(Appareil.duMoteur));
       if (!appareils.any((a) => a.nom == selection)) selection = appareils.first.nom;
+      // Admin : d'après le groupe que le verrou a signé pour cet appareil.
+      final m = appareils.where((a) => a.moi);
+      if (m.isNotEmpty && m.first.groupe.isNotEmpty) admin = m.first.groupe == 'admins';
     }
+    // Les demandes : une fois sur trois (toutes les six secondes).
+    if (_tours++ % 3 == 0) await _lireDemandes();
     notifyListeners();
   }
+
+  int _tours = 0;
 
   @override
   void dispose() {
@@ -443,16 +501,37 @@ class Reseau extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Refusée : la demande disparaît, rien n'entre dans le réseau.
-  void traiter(Demande d) {
+  /// Refusée : la demande disparaît, rien n'entre dans le réseau. Sur le
+  /// vrai réseau, l'appareil est retiré du serveur. Rend l'erreur, ou null.
+  Future<String?> traiter(Demande d) async {
+    if (reel) {
+      try {
+        await Moteur.retirer(d.cle);
+      } on ErreurMoteur catch (e) {
+        return e.message;
+      }
+    }
     demandes.remove(d);
     notifyListeners();
+    return null;
   }
 
-  /// Signée : l'appareil reçoit la première adresse libre et un certificat
-  /// de 120 jours, et rejoint la liste de son propriétaire. Il reste hors
-  /// ligne tant qu'il ne s'est pas connecté.
-  void signer(Demande d) {
+  /// Signée : sur le vrai réseau, la clé du verrou sort du coffre (l'empreinte
+  /// vient d'être reconnue) et le moteur signe. Dans la démo, l'appareil
+  /// reçoit la première adresse libre et un certificat de 120 jours. Rend
+  /// l'erreur à afficher, ou null.
+  Future<String?> signer(Demande d) async {
+    if (reel) {
+      try {
+        await Moteur.signer(d.cle);
+      } on ErreurMoteur catch (e) {
+        return e.message;
+      }
+      demandes.remove(d);
+      notifyListeners();
+      await _lireDemandes();
+      return null;
+    }
     demandes.remove(d);
     final prises = appareils.map((a) => a.adresse).toSet();
     var n = 2;
@@ -468,17 +547,31 @@ class Reseau extends ChangeNotifier {
       certificat: Certificat(debut: maintenant, fin: maintenant.add(const Duration(days: 120)), empreinte: d.empreinte),
     ));
     notifyListeners();
+    return null;
   }
 
-  /// L'admin renomme n'importe quel appareil, les autres seulement les
-  /// leurs. Le nom n'est pas dans le certificat : pas besoin de resigner.
-  // Le vrai serveur n'a pas encore de quoi renommer : seulement dans la démo.
-  bool peutRenommer(Appareil a) => !reel && (admin || a.proprietaire == compte.toLowerCase());
+  /// Chacun renomme son appareil ; l'admin, n'importe lequel. Le nom
+  /// affiché n'est pas dans le certificat : pas besoin de resigner.
+  bool peutRenommer(Appareil a) => reel ? (a.moi || admin) : (admin || a.proprietaire == compte.toLowerCase());
 
-  /// Renomme [a] en « [prefixe][suffixe] ». Rend l'erreur à afficher, ou
-  /// null si c'est fait.
-  String? renommer(Appareil a, String prefixe) {
-    final nouveau = nomPropre(prefixe) + a.suffixe;
+  /// Renomme [a]. Sur le vrai réseau, c'est le nom affiché qui change, tel
+  /// quel (majuscules, espaces) ; dans la démo, le nom devient
+  /// « [texte][suffixe] ». Rend l'erreur à afficher, ou null si c'est fait.
+  Future<String?> renommer(Appareil a, String texte) async {
+    if (reel) {
+      final libelle = texte.trim();
+      if (libelle.isEmpty) return 'Le nom est vide';
+      try {
+        await Moteur.libeller(a.moi ? '' : a.cle, libelle);
+      } on ErreurMoteur catch (e) {
+        return e.message;
+      }
+      final i = appareils.indexWhere((b) => b.adresse == a.adresse);
+      if (i >= 0) appareils[i] = appareils[i].avecLibelle(libelle);
+      notifyListeners();
+      return null;
+    }
+    final nouveau = nomPropre(texte) + a.suffixe;
     if (nouveau == a.nom) return null;
     if (appareils.any((b) => b.nom == nouveau)) return '« $nouveau » est déjà pris';
     final i = appareils.indexOf(a);
@@ -487,6 +580,59 @@ class Reseau extends ChangeNotifier {
     if (selection == a.nom) selection = nouveau;
     notifyListeners();
     return null;
+  }
+
+  // ─── La clé du verrou, pour l'admin ───
+
+  /// La clé du verrou est dans le coffre de ce téléphone : il peut signer.
+  bool cleVerrouPresente = false;
+
+  /// Range la clé du verrou collée par l'admin (l'empreinte vient d'être
+  /// reconnue). Rend l'erreur à afficher, ou null.
+  Future<String?> importerVerrou(String graine) async {
+    try {
+      await Moteur.rangerVerrou(graine);
+    } on ErreurMoteur catch (e) {
+      return e.message;
+    }
+    cleVerrouPresente = true;
+    notifyListeners();
+    return null;
+  }
+
+  Future<void> oublierVerrou() async {
+    await Moteur.effacerVerrou();
+    cleVerrouPresente = false;
+    notifyListeners();
+  }
+
+  /// Les appareils qui attendent une signature, pour l'admin : ceux que le
+  /// serveur connaît sans certificat.
+  Future<void> _lireDemandes() async {
+    if (!reel || !admin) return;
+    final List<Map<String, dynamic>> liste;
+    try {
+      liste = await Moteur.appareils();
+    } on ErreurMoteur {
+      return;
+    }
+    final moiCle = moi.cle;
+    demandes
+      ..clear()
+      ..addAll([
+        for (final f in liste)
+          if (f['signe'] != true && f['cle'] != moiCle)
+            Demande(
+              nom: (f['libelle'] as String? ?? '').isNotEmpty ? f['libelle'] as String : f['nom'] as String? ?? '?',
+              compte: f['proprietaire'] as String? ?? '',
+              type: (f['etiquette'] as String? ?? '').isNotEmpty
+                  ? TypeAppareil.maison
+                  : (f['systeme'] == 'android' ? TypeAppareil.telephone : TypeAppareil.pc),
+              empreinte: (f['empreinte'] as String? ?? '').split('-'),
+              cle: f['cle'] as String? ?? '',
+            ),
+      ]);
+    notifyListeners();
   }
 
   // ─── Réglages de l'appli, gardés sur le téléphone ───
@@ -502,7 +648,8 @@ class Reseau extends ChangeNotifier {
 
   Future<void> chargerReglages() async {
     final p = await SharedPreferences.getInstance();
-    verrouAppli = p.getBool(_cleVerrou) ?? false;
+    // Sur le vrai réseau, l'appli s'ouvre à l'empreinte par défaut.
+    verrouAppli = p.getBool(_cleVerrou) ?? reel;
     ecranMasque = p.getBool(_cleEcran) ?? false;
     notifyListeners();
   }
@@ -536,7 +683,7 @@ String duree(Duration d) {
 }
 
 /// La version affichée dans « À propos » (même valeur que pubspec.yaml).
-const versionAppli = '0.4.1';
+const versionAppli = '0.5.0';
 
 /// « tristan.joncour@gmail.com » → « Tristan » : de quoi nommer quelqu'un
 /// sans son nom complet.

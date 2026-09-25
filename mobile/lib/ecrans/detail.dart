@@ -5,6 +5,7 @@ import '../composants.dart';
 import '../donnees.dart';
 import '../etat.dart';
 import '../icones.dart';
+import '../securite.dart';
 import '../theme.dart';
 
 /// Le détail d'un appareil, en plein écran (téléphone, écran extérieur).
@@ -39,6 +40,10 @@ class EcranDetail extends StatelessWidget {
                 ),
               ),
               if (a.ports.isNotEmpty) ...[const SizedBox(height: 14), _BoutonOuvrir(a: a)],
+              if (EtatReseau.of(context).peutRetirer(a)) ...[
+                const SizedBox(height: 10),
+                _BoutonRetirer(a: a, apres: () => Navigator.pop(context)),
+              ],
             ]),
           ),
         ),
@@ -62,6 +67,7 @@ class PanneauDetail extends StatelessWidget {
       Flexible(child: Etiquette(a.nomAffiche, couleur: Couleurs.texte)),
     ]);
     final bouton = a.ports.isNotEmpty ? _BoutonOuvrir(a: a) : null;
+    final retirer = EtatReseau.of(context).peutRetirer(a) ? _BoutonRetirer(a: a) : null;
     // Rien n'est étiré pour remplir la hauteur : le panneau défile si le
     // contenu ne tient pas, au lieu d'écraser la carte du certificat.
     final Widget corps = switch (disposition) {
@@ -75,6 +81,7 @@ class PanneauDetail extends StatelessWidget {
             const SizedBox(height: 12),
             _CarteCertificat(a: a),
             if (bouton != null) ...[const SizedBox(height: 12), bouton],
+            if (retirer != null) ...[const SizedBox(height: 10), retirer],
           ]),
         ),
       Disposition.deuxColonnes => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -92,6 +99,7 @@ class PanneauDetail extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               _CarteCertificat(a: a, compact: true),
               if (bouton != null) ...[const SizedBox(height: 12), bouton],
+              if (retirer != null) ...[const SizedBox(height: 10), retirer],
             ]),
           ),
         ]),
@@ -455,4 +463,69 @@ Future<void> renommerAppareil(BuildContext context, Appareil a) async {
   );
   // La fenêtre s'efface encore un instant avec le champ : on attend.
   Future<void>.delayed(const Duration(milliseconds: 400), champ.dispose);
+}
+
+/// « Retirer du réseau », pour l'admin : une confirmation, puis l'empreinte.
+/// Le serveur oublie l'appareil ; pour un appareil volé, il faudra aussi le
+/// révoquer avec le verrou (sinon il pourrait refaire une demande).
+class _BoutonRetirer extends StatelessWidget {
+  const _BoutonRetirer({required this.a, this.apres});
+  final Appareil a;
+  final VoidCallback? apres;
+
+  Future<void> _retirer(BuildContext context) async {
+    final r = EtatReseau.of(context);
+    final messager = ScaffoldMessenger.of(context);
+    final oui = await showDialog<bool>(
+      context: context,
+      barrierColor: const Color(0xA8020407),
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Bordee(
+            bordure: Bords.accent(Couleurs.rouge),
+            fond: const Color(0xFF0A1119),
+            rayon: 24,
+            padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Retirer ${a.nomAffiche} ?', style: texte(20, graisse: 600, espacement: -0.4)),
+              const SizedBox(height: 8),
+              Text(
+                "Il quitte le réseau tout de suite : plus aucun appareil ne le voit. Pour revenir, il devra refaire une demande et être signé à nouveau.",
+                style: texte(14, couleur: Couleurs.secondaire, hauteur: 1.4),
+              ),
+              const SizedBox(height: 20),
+              Row(children: [
+                Expanded(child: BoutonFantome(libelle: 'Annuler', onTap: () => Navigator.pop(context, false))),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: BoutonFantome(
+                    libelle: 'Retirer',
+                    couleur: Couleurs.rougeClair,
+                    bord: Couleurs.rouge.withValues(alpha: 0.45),
+                    onTap: () => Navigator.pop(context, true),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
+    if (oui != true) return;
+    if (await confirmerIdentite('Retirer ${a.nomAffiche}') != Identite.confirmee) return;
+    final e = await r.retirerAppareil(a);
+    messager.showSnackBar(SnackBar(content: Text(e ?? '${a.nomAffiche} retiré du réseau')));
+    if (e == null) apres?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) => BoutonFantome(
+        libelle: 'Retirer du réseau',
+        couleur: Couleurs.rougeClair,
+        bord: Couleurs.rouge.withValues(alpha: 0.4),
+        onTap: () => _retirer(context),
+      );
 }

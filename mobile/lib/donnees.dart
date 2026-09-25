@@ -555,6 +555,24 @@ class Reseau extends ChangeNotifier {
 
   /// Chacun renomme son appareil ; l'admin, n'importe lequel. Le nom
   /// affiché n'est pas dans le certificat : pas besoin de resigner.
+  /// L'admin peut retirer un appareil du réseau, sauf le sien et le serveur.
+  bool peutRetirer(Appareil a) => admin && !a.moi && a.type != TypeAppareil.serveur && (!reel || a.cle.isNotEmpty);
+
+  /// Retire [a] du réseau : le serveur l'oublie et ne relaie plus rien pour
+  /// lui. Rend l'erreur à afficher, ou null si c'est fait.
+  Future<String?> retirerAppareil(Appareil a) async {
+    if (reel) {
+      try {
+        await Moteur.retirer(a.cle);
+      } on ErreurMoteur catch (e) {
+        return e.message;
+      }
+    }
+    appareils.removeWhere((x) => x.adresse == a.adresse);
+    notifyListeners();
+    return null;
+  }
+
   bool peutRenommer(Appareil a) => reel ? (a.moi || admin) : (admin || a.proprietaire == compte.toLowerCase());
 
   /// Renomme [a]. Sur le vrai réseau, c'est le nom affiché qui change, tel
@@ -686,7 +704,7 @@ String duree(Duration d) {
 }
 
 /// La version affichée dans « À propos » (même valeur que pubspec.yaml).
-const versionAppli = '0.5.6';
+const versionAppli = '0.5.7';
 
 /// « tristan.joncour@gmail.com » → « Tristan » : de quoi nommer quelqu'un
 /// sans son nom complet.

@@ -3,3 +3,6 @@ etat/
 .env
 # Signée avec la clé du verrou de chaque installation.
 politique/politique.sig
+
+# Pages intermédiaires des figures : elles portent des chemins de la machine.
+docs/tools/html/

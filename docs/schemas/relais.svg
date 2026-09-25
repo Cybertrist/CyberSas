@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 370" width="1280" height="370" role="img" aria-label="Un paquet part du téléphone fold8-tristan, en clair : GET / HTTP/1.1. Il traverse le serveur sasd, qui ne voit que des octets chiffrés, puis arrive déchiffré à la maison. Le serveur relaie ce qu'il ne peut pas lire.">
+<title>Un paquet part du téléphone fold8-tristan, en clair : GET / HTTP/1.1. Il traverse le serveur sasd, qui ne voit que des octets chiffrés, puis arrive déchiffré à la maison. Le serveur relaie ce qu'il ne peut pas lire.</title>
+<defs>
+  <filter id="halo" x="-50%" y="-50%" width="200%" height="200%">
+    <feGaussianBlur stdDeviation="6" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="flou" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>
+  <pattern id="grille" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M40 0H0V40" fill="none" stroke="#31E7FD" stroke-opacity="0.05"/>
+  </pattern>
+  <radialGradient id="lueur" cx="50%" cy="0%" r="80%">
+    <stop offset="0" stop-color="#31E7FD" stop-opacity="0.10"/><stop offset="1" stop-color="#31E7FD" stop-opacity="0"/>
+  </radialGradient>
+</defs>
+<rect width="1280" height="370" rx="16" fill="#0D1117"/>
+<rect width="1280" height="370" rx="16" fill="url(#grille)"/>
+<rect width="1280" height="370" rx="16" fill="url(#lueur)"/>
+
+<path d="M 300 158 H 490" fill="none" stroke="#2F3A47" stroke-width="2" stroke-dasharray="6 7">
+  <animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path><path d="M 790 158 H 980" fill="none" stroke="#2F3A47" stroke-width="2" stroke-dasharray="6 7">
+  <animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path>
+<g>
+  <rect x="40" y="120" width="260" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  <rect x="40" y="120" width="260" height="76" rx="14" fill="none" stroke="#31E7FD" stroke-width="1.6" opacity="0" filter="url(#halo)"><animate attributeName="opacity" dur="7s" repeatCount="indefinite" keyTimes="0;0.02;0.3;0.32;1" values="0;1;1;0;0"/></rect>
+  <rect x="40" y="134" width="3" height="48" rx="1.5" fill="#31E7FD"/>
+  <g transform="translate(58,144)"><rect x="7" y="1" width="14" height="26" rx="3.5" fill="none" stroke="#31E7FD" stroke-width="2"/><path d="M12 23 H16" stroke="#31E7FD" stroke-width="2" stroke-linecap="round"/></g>
+  <text x="98" y="155" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >fold8-tristan</text>
+  <text x="98" y="175" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >10.77.0.18 · le téléphone</text>
+</g>
+<g>
+  <rect x="490" y="120" width="300" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  <rect x="490" y="120" width="300" height="76" rx="14" fill="none" stroke="#01B9FD" stroke-width="1.6" opacity="0" filter="url(#halo)"><animate attributeName="opacity" dur="7s" repeatCount="indefinite" keyTimes="0;0.3;0.32;0.6;0.62;1" values="0;0;1;1;0;0"/></rect>
+  <rect x="490" y="134" width="3" height="48" rx="1.5" fill="#01B9FD"/>
+  <g transform="translate(508,144)"><rect x="3" y="3" width="22" height="9" rx="2.5" fill="none" stroke="#01B9FD" stroke-width="2"/><rect x="3" y="16" width="22" height="9" rx="2.5" fill="none" stroke="#01B9FD" stroke-width="2"/><path d="M8 7.5h.01M8 20.5h.01" stroke="#01B9FD" stroke-width="3" stroke-linecap="round"/></g>
+  <text x="548" y="155" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >sasd</text>
+  <text x="548" y="175" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >le serveur, qui relaie</text>
+</g>
+<g>
+  <rect x="980" y="120" width="260" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  <rect x="980" y="120" width="260" height="76" rx="14" fill="none" stroke="#3DDC97" stroke-width="1.6" opacity="0" filter="url(#halo)"><animate attributeName="opacity" dur="7s" repeatCount="indefinite" keyTimes="0;0.6;0.62;0.95;0.97;1" values="0;0;1;1;0;0"/></rect>
+  <rect x="980" y="134" width="3" height="48" rx="1.5" fill="#3DDC97"/>
+  <g transform="translate(998,144)"><path d="M4 25 V12 L14 4 L24 12 V25 M11 25 V18 H17 V25" fill="none" stroke="#3DDC97" stroke-width="2" stroke-linejoin="round"/></g>
+  <text x="1038" y="155" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >maison</text>
+  <text x="1038" y="175" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >10.77.0.2 · à la maison</text>
+</g>
+<g filter="url(#halo)">
+  <circle cx="300" cy="158" r="11" fill="#31E7FD" opacity="0.22"><animate attributeName="cx" dur="7s" repeatCount="indefinite" keyTimes="0;0.12;0.3;0.52;0.62;0.64;0.8;1" values="300.0;300.0;490.4;490.4;789.6;789.6;980.0;980.0"/></circle>
+  <circle cx="300" cy="158" r="6" fill="#31E7FD"><animate attributeName="cx" dur="7s" repeatCount="indefinite" keyTimes="0;0.12;0.3;0.52;0.62;0.64;0.8;1" values="300.0;300.0;490.4;490.4;789.6;789.6;980.0;980.0"/></circle>
+</g>
+<g opacity="0"><animate attributeName="opacity" dur="7s" repeatCount="indefinite" keyTimes="0;0.02;0.3;0.33;1" values="0;1;1;0;0"/>
+  <rect x="20" y="224" width="300" height="112" rx="12" fill="#0A1017" stroke="#31E7FD" stroke-opacity="0.45"/>
+  <text x="38" y="250" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5" font-weight="400" fill="#31E7FD" text-anchor="start" letter-spacing="2">EN CLAIR, SUR LE TÉLÉPHONE</text>
+  <text x="38" y="278" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" font-weight="400" fill="#F1F5F9" text-anchor="start" >GET / HTTP/1.1</text><text x="38" y="300" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" font-weight="400" fill="#F1F5F9" text-anchor="start" >Host: maison.sas.internal</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" dur="7s" repeatCount="indefinite" keyTimes="0;0.29;0.32;0.6;0.63;1" values="0;0;1;1;0;0"/>
+  <rect x="490" y="224" width="300" height="112" rx="12" fill="#0A1017" stroke="#FF5C63" stroke-opacity="0.45"/>
+  <text x="508" y="250" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5" font-weight="400" fill="#FF5C63" text-anchor="start" letter-spacing="2">CE QUE VOIT LE SERVEUR</text>
+  <text x="508" y="278" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" font-weight="400" fill="#F1F5F9" text-anchor="start" >7f 3a 9c e1 0b 52 d4 88</text><text x="508" y="300" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" font-weight="400" fill="#F1F5F9" text-anchor="start" >19 a7 f0 3e 6c 21 …</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" dur="7s" repeatCount="indefinite" keyTimes="0;0.59;0.62;0.95;0.98;1" values="0;0;1;1;0;0"/>
+  <rect x="960" y="224" width="300" height="112" rx="12" fill="#0A1017" stroke="#3DDC97" stroke-opacity="0.45"/>
+  <text x="978" y="250" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5" font-weight="400" fill="#3DDC97" text-anchor="start" letter-spacing="2">DÉCHIFFRÉ, À LA MAISON</text>
+  <text x="978" y="278" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" font-weight="400" fill="#F1F5F9" text-anchor="start" >GET / HTTP/1.1</text><text x="978" y="300" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" font-weight="400" fill="#F1F5F9" text-anchor="start" >Host: maison.sas.internal</text>
+</g>
+<text x="640" y="60" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" fill="#31E7FD" text-anchor="middle" letter-spacing="3">LE SERVEUR RELAIE CE QU’IL NE PEUT PAS LIRE</text>
+<text x="640" y="88" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="15" font-weight="400" fill="#94A3B0" text-anchor="middle" >Les deux appareils ont leur propre session Noise : le serveur n’en a pas les clés.</text>
+</svg>

@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 290" width="1280" height="290" role="img" aria-label="Un nouvel appareil rejoint le réseau en cinq étapes : 01 l'invitation, un QR à usage unique ; 02 l'appareil crée sa propre clé ; 03 l'admin compare l'empreinte, Qm7X-tR2k-9vLp ; 04 l'admin signe avec son doigt ; 05 l'appareil est dans le réseau, en 10.77.0.3, pour 120 jours.">
+<title>Un nouvel appareil rejoint le réseau en cinq étapes : 01 l'invitation, un QR à usage unique ; 02 l'appareil crée sa propre clé ; 03 l'admin compare l'empreinte, Qm7X-tR2k-9vLp ; 04 l'admin signe avec son doigt ; 05 l'appareil est dans le réseau, en 10.77.0.3, pour 120 jours.</title>
+<defs>
+  <filter id="halo" x="-50%" y="-50%" width="200%" height="200%">
+    <feGaussianBlur stdDeviation="6" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="flou" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>
+  <pattern id="grille" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M40 0H0V40" fill="none" stroke="#31E7FD" stroke-opacity="0.05"/>
+  </pattern>
+  <radialGradient id="lueur" cx="50%" cy="0%" r="80%">
+    <stop offset="0" stop-color="#31E7FD" stop-opacity="0.10"/><stop offset="1" stop-color="#31E7FD" stop-opacity="0"/>
+  </radialGradient>
+</defs>
+<rect width="1280" height="290" rx="16" fill="#0D1117"/>
+<rect width="1280" height="290" rx="16" fill="url(#grille)"/>
+<rect width="1280" height="290" rx="16" fill="url(#lueur)"/>
+
+<text x="640" y="60" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" fill="#31E7FD" text-anchor="middle" letter-spacing="3">UN NOUVEL APPAREIL, DE L’INVITATION AU RÉSEAU</text>
+<text x="640" y="88" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="15" font-weight="400" fill="#94A3B0" text-anchor="middle" >La clé privée ne quitte jamais l’appareil. L’admin compare l’empreinte, puis signe avec son doigt.</text>
+<text x="152" y="112" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#5C6A7A" text-anchor="middle" >01</text><text x="396" y="112" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#5C6A7A" text-anchor="middle" >02</text><text x="640" y="112" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#5C6A7A" text-anchor="middle" >03</text><text x="884" y="112" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#5C6A7A" text-anchor="middle" >04</text><text x="1128" y="112" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#5C6A7A" text-anchor="middle" >05</text>
+<path d="M 152 248 H 1128" stroke="#2F3A47" stroke-width="2" stroke-dasharray="6 7"/>
+<g>
+  <rect x="41" y="130" width="222" height="80" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  <rect x="41" y="130" width="222" height="80" rx="14" fill="none" stroke="#31E7FD" stroke-width="1.6" opacity="0" filter="url(#halo)"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.01;0.03;0.21;0.23;1" values="0;0;1;1;0;0"/></rect>
+  <rect x="41" y="144" width="3" height="52" rx="1.5" fill="#31E7FD"/>
+  <g transform="translate(59,156)"><rect x="3" y="3" width="9" height="9" rx="1.5" fill="none" stroke="#31E7FD" stroke-width="2"/><rect x="16" y="3" width="9" height="9" rx="1.5" fill="none" stroke="#31E7FD" stroke-width="2"/><rect x="3" y="16" width="9" height="9" rx="1.5" fill="none" stroke="#31E7FD" stroke-width="2"/><path d="M17 17h3v3h-3zM22 22h3v3h-3z" fill="#31E7FD"/></g>
+  <text x="99" y="167" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >Invitation</text>
+  <text x="99" y="187" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >QR à usage unique</text>
+</g>
+<g>
+  <rect x="285" y="130" width="222" height="80" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  <rect x="285" y="130" width="222" height="80" rx="14" fill="none" stroke="#31E7FD" stroke-width="1.6" opacity="0" filter="url(#halo)"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.19;0.21;0.39;0.41;1" values="0;0;1;1;0;0"/></rect>
+  <rect x="285" y="144" width="3" height="52" rx="1.5" fill="#31E7FD"/>
+  <g transform="translate(303,156)"><circle cx="9" cy="18" r="5.5" fill="none" stroke="#31E7FD" stroke-width="2"/><path d="M13 14 L24 3 M20 7 L23 10 M17 10 L19 12" fill="none" stroke="#31E7FD" stroke-width="2" stroke-linecap="round"/></g>
+  <text x="343" y="167" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >Sa propre clé</text>
+  <text x="343" y="187" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >créée sur l’appareil</text>
+</g>
+<g>
+  <rect x="529" y="130" width="222" height="80" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  <rect x="529" y="130" width="222" height="80" rx="14" fill="none" stroke="#01B9FD" stroke-width="1.6" opacity="0" filter="url(#halo)"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.37;0.39;0.57;0.59;1" values="0;0;1;1;0;0"/></rect>
+  <rect x="529" y="144" width="3" height="52" rx="1.5" fill="#01B9FD"/>
+  <g transform="translate(547,156)"><path d="M2 14 C6 7 22 7 26 14 C22 21 6 21 2 14 Z" fill="none" stroke="#01B9FD" stroke-width="2"/><circle cx="14" cy="14" r="3.5" fill="none" stroke="#01B9FD" stroke-width="2"/></g>
+  <text x="587" y="167" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >Empreinte</text>
+  <text x="587" y="187" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >Qm7X-tR2k-9vLp</text>
+</g>
+<g>
+  <rect x="773" y="130" width="222" height="80" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  <rect x="773" y="130" width="222" height="80" rx="14" fill="none" stroke="#3DDC97" stroke-width="1.6" opacity="0" filter="url(#halo)"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.55;0.57;0.75;0.77;1" values="0;0;1;1;0;0"/></rect>
+  <rect x="773" y="144" width="3" height="52" rx="1.5" fill="#3DDC97"/>
+  <g transform="translate(791,156)"><path d="M5 13 A9 9 0 0 1 23 13 M9 25 C10 21 10 17 10 14 A4 4 0 0 1 18 14 C18 18 18 22 16 26 M14 14 C14 18 14 21 12 25 M22 18 C22 20 21.5 22 21 24" fill="none" stroke="#3DDC97" stroke-width="2" stroke-linecap="round"/></g>
+  <text x="831" y="167" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >Signé</text>
+  <text x="831" y="187" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >au doigt, par l’admin</text>
+</g>
+<g>
+  <rect x="1017" y="130" width="222" height="80" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  <rect x="1017" y="130" width="222" height="80" rx="14" fill="none" stroke="#3DDC97" stroke-width="1.6" opacity="0" filter="url(#halo)"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.73;0.75;0.93;0.95;1" values="0;0;1;1;0;0"/></rect>
+  <rect x="1017" y="144" width="3" height="52" rx="1.5" fill="#3DDC97"/>
+  <g transform="translate(1035,156)"><circle cx="14" cy="5" r="3" fill="none" stroke="#3DDC97" stroke-width="2"/><circle cx="5" cy="22" r="3" fill="none" stroke="#3DDC97" stroke-width="2"/><circle cx="23" cy="22" r="3" fill="none" stroke="#3DDC97" stroke-width="2"/><path d="M12.5 7.5 L6.5 19.5 M15.5 7.5 L21.5 19.5 M8 22 H20" stroke="#3DDC97" stroke-width="2"/></g>
+  <text x="1075" y="167" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >Dans le réseau</text>
+  <text x="1075" y="187" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >10.77.0.3 · 120 jours</text>
+</g>
+<g filter="url(#halo)">
+  <circle cx="152" cy="248" r="10" fill="#3DDC97" opacity="0.22"><animate attributeName="cx" dur="11s" repeatCount="indefinite" keyTimes="0;0.050;0.170;0.230;0.350;0.410;0.530;0.590;0.710;0.770;0.95;1" values="152.0;152.0;152.0;396.0;396.0;640.0;640.0;884.0;884.0;1128.0;1128.0;1128.0"/></circle>
+  <circle cx="152" cy="248" r="5" fill="#3DDC97"><animate attributeName="cx" dur="11s" repeatCount="indefinite" keyTimes="0;0.050;0.170;0.230;0.350;0.410;0.530;0.590;0.710;0.770;0.95;1" values="152.0;152.0;152.0;396.0;396.0;640.0;640.0;884.0;884.0;1128.0;1128.0;1128.0"/></circle>
+</g>
+</svg>

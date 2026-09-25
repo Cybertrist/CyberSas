@@ -14,13 +14,18 @@ class Marque extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text.rich(
-        TextSpan(children: [
-          TextSpan(text: 'Cyber', style: syne(taille)),
-          TextSpan(text: 'Sas', style: syne(taille, couleur: Couleurs.cyan)),
-        ]),
-        maxLines: 1,
-        softWrap: false,
-      );
+    TextSpan(
+      children: [
+        TextSpan(text: 'Cyber', style: syne(taille)),
+        TextSpan(
+          text: 'Sas',
+          style: syne(taille, couleur: Couleurs.cyan),
+        ),
+      ],
+    ),
+    maxLines: 1,
+    softWrap: false,
+  );
 }
 
 /// Une boîte au fond sombre et à la bordure d'1 dp en dégradé
@@ -77,21 +82,30 @@ abstract final class Bords {
     stops: [0, 0.45, 1],
   );
   static LinearGradient accent(Color c) => LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [c.withValues(alpha: 0.6), Couleurs.bordure, c.withValues(alpha: 0.25)],
-        stops: const [0, 0.5, 1],
-      );
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [c.withValues(alpha: 0.6), Couleurs.bordure, c.withValues(alpha: 0.25)],
+    stops: const [0, 0.5, 1],
+  );
   static const plat = LinearGradient(colors: [Couleurs.bordure, Couleurs.bordure]);
 }
 
 /// Halo des cartes actives : 0 0 30px -14px rgba(49,231,253,.55).
-List<BoxShadow> haloCarte([Color c = Couleurs.cyan, double a = 0.55]) =>
-    [BoxShadow(color: c.withValues(alpha: a), blurRadius: 30, spreadRadius: -14)];
+List<BoxShadow> haloCarte([Color c = Couleurs.cyan, double a = 0.55]) => [
+  BoxShadow(color: c.withValues(alpha: a), blurRadius: 30, spreadRadius: -14),
+];
 
 /// Une carte simple : fond translucide, bordure #2A333D.
 class Carte extends StatelessWidget {
-  const Carte({super.key, required this.child, this.padding = EdgeInsets.zero, this.rayon = 18, this.onTap, this.fond = Couleurs.carte, this.bord = Couleurs.bordure});
+  const Carte({
+    super.key,
+    required this.child,
+    this.padding = EdgeInsets.zero,
+    this.rayon = 18,
+    this.onTap,
+    this.fond = Couleurs.carte,
+    this.bord = Couleurs.bordure,
+  });
   final Widget child;
   final EdgeInsetsGeometry padding;
   final double rayon;
@@ -101,16 +115,19 @@ class Carte extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-        color: fond,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(rayon), side: BorderSide(color: bord)),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          splashColor: Couleurs.cyan.withValues(alpha: 0.08),
-          highlightColor: Couleurs.cyan.withValues(alpha: 0.04),
-          child: Padding(padding: padding, child: child),
-        ),
-      );
+    color: fond,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(rayon),
+      side: BorderSide(color: bord),
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      onTap: onTap,
+      splashColor: Couleurs.cyan.withValues(alpha: 0.08),
+      highlightColor: Couleurs.cyan.withValues(alpha: 0.04),
+      child: Padding(padding: padding, child: child),
+    ),
+  );
 }
 
 /// Une étiquette mono en capitales.
@@ -121,8 +138,13 @@ class Etiquette extends StatelessWidget {
   final double taille;
 
   @override
-  Widget build(BuildContext context) =>
-      Text(texte.toUpperCase(), style: etiquette(couleur: couleur, taille: taille), maxLines: 1, softWrap: false, overflow: TextOverflow.fade);
+  Widget build(BuildContext context) => Text(
+    texte.toUpperCase(),
+    style: etiquette(couleur: couleur, taille: taille),
+    maxLines: 1,
+    softWrap: false,
+    overflow: TextOverflow.fade,
+  );
 }
 
 /// Une puce : « ADMIN », « :443 », « EN ATTENTE »…
@@ -136,21 +158,21 @@ class Puce extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: EdgeInsets.symmetric(horizontal: monoPolice ? 7 : 8, vertical: monoPolice ? 2.5 : 3),
-        decoration: BoxDecoration(
-          color: fond ? couleur.withValues(alpha: 0.06) : null,
-          borderRadius: BorderRadius.circular(monoPolice ? 7 : 8),
-          border: Border.all(color: bord ?? couleur.withValues(alpha: 0.38)),
-        ),
-        child: Text(
-          libelle,
-          style: monoPolice
-              ? mono(11, graisse: 400, couleur: couleur, espacement: 0.66)
-              : texte(11.5, graisse: 600, couleur: couleur),
-          maxLines: 1,
-          softWrap: false,
-        ),
-      );
+    padding: EdgeInsets.symmetric(horizontal: monoPolice ? 7 : 8, vertical: monoPolice ? 2.5 : 3),
+    decoration: BoxDecoration(
+      color: fond ? couleur.withValues(alpha: 0.06) : null,
+      borderRadius: BorderRadius.circular(monoPolice ? 7 : 8),
+      border: Border.all(color: bord ?? couleur.withValues(alpha: 0.38)),
+    ),
+    child: Text(
+      libelle,
+      style: monoPolice
+          ? mono(11, graisse: 400, couleur: couleur, espacement: 0.66)
+          : texte(11.5, graisse: 600, couleur: couleur),
+      maxLines: 1,
+      softWrap: false,
+    ),
+  );
 }
 
 /// « :80 » : un port ouvert.
@@ -160,13 +182,13 @@ class PucePort extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: Couleurs.cyan.withValues(alpha: 0.32)),
-        ),
-        child: Text(':$port', style: mono(11.5, graisse: 400, couleur: Couleurs.cyan)),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: Couleurs.cyan.withValues(alpha: 0.32)),
+    ),
+    child: Text(':$port', style: mono(11.5, graisse: 400, couleur: Couleurs.cyan)),
+  );
 }
 
 /// Un avatar rond : « T ».
@@ -179,8 +201,10 @@ class Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = Text(lettre,
-        style: texte(taille * (plein ? 0.4 : 0.39), graisse: plein ? 700 : 600, couleur: plein ? Couleurs.fond : Couleurs.texte));
+    final t = Text(
+      lettre,
+      style: texte(taille * (plein ? 0.4 : 0.39), graisse: plein ? 700 : 600, couleur: plein ? Couleurs.fond : Couleurs.texte),
+    );
     final Widget rond = plein
         ? Container(
             width: taille,
@@ -188,7 +212,11 @@ class Avatar extends StatelessWidget {
             alignment: Alignment.center,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Couleurs.cyan, Couleurs.bleu]),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Couleurs.cyan, Couleurs.bleu],
+              ),
             ),
             child: t,
           )
@@ -198,7 +226,12 @@ class Avatar extends StatelessWidget {
             padding: const EdgeInsets.all(1),
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Couleurs.cyan, Couleurs.bordure], stops: [0, 0.6]),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Couleurs.cyan, Couleurs.bordure],
+                stops: [0, 0.6],
+              ),
             ),
             child: Container(
               alignment: Alignment.center,
@@ -216,7 +249,14 @@ class Avatar extends StatelessWidget {
 enum EtatIcone { enLigne, horsLigne, attente }
 
 class CaseIcone extends StatelessWidget {
-  const CaseIcone(this.ico, {super.key, required this.couleur, this.etat = EtatIcone.enLigne, this.taille = 34, this.halo = false});
+  const CaseIcone(
+    this.ico, {
+    super.key,
+    required this.couleur,
+    this.etat = EtatIcone.enLigne,
+    this.taille = 34,
+    this.halo = false,
+  });
   final Ico ico;
   final Color couleur;
   final EtatIcone etat;
@@ -303,28 +343,38 @@ class Empreinte extends StatelessWidget {
   final double hauteur;
 
   @override
-  Widget build(BuildContext context) => Row(children: [
-        for (var i = 0; i < blocs.length; i++) ...[
-          if (i > 0) const SizedBox(width: 8),
-          Expanded(
-            child: Container(
-              height: hauteur,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: Couleurs.bloc,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: bord),
-              ),
-              child: Text(blocs[i], style: mono(hauteur * 0.44, couleur: couleur)),
+  Widget build(BuildContext context) => Row(
+    children: [
+      for (var i = 0; i < blocs.length; i++) ...[
+        if (i > 0) const SizedBox(width: 8),
+        Expanded(
+          child: Container(
+            height: hauteur,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Couleurs.bloc,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: bord),
             ),
+            child: Text(blocs[i], style: mono(hauteur * 0.44, couleur: couleur)),
           ),
-        ],
-      ]);
+        ),
+      ],
+    ],
+  );
 }
 
 /// Bouton principal : fond sombre, bordure en dégradé cyan → bleu, halo.
 class BoutonContour extends StatelessWidget {
-  const BoutonContour({super.key, required this.libelle, this.ico, this.onTap, this.hauteur = 50, this.rayon = 18, this.taillePolice = 15.5});
+  const BoutonContour({
+    super.key,
+    required this.libelle,
+    this.ico,
+    this.onTap,
+    this.hauteur = 50,
+    this.rayon = 18,
+    this.taillePolice = 15.5,
+  });
   final String libelle;
   final Ico? ico;
   final VoidCallback? onTap;
@@ -334,27 +384,39 @@ class BoutonContour extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Bordee(
-        bordure: Bords.cyan,
-        fond: const Color(0xF20A121A),
-        rayon: rayon,
-        onTap: onTap,
-        halo: [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.7), blurRadius: 26, spreadRadius: -10)],
-        child: Container(
-          height: hauteur - 2,
-          decoration: BoxDecoration(
-            gradient: RadialGradient(radius: 2.4, colors: [Colors.transparent, Couleurs.cyan.withValues(alpha: 0.06)]),
+    bordure: Bords.cyan,
+    fond: const Color(0xF20A121A),
+    rayon: rayon,
+    onTap: onTap,
+    halo: [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.7), blurRadius: 26, spreadRadius: -10)],
+    child: Container(
+      height: hauteur - 2,
+      decoration: BoxDecoration(
+        gradient: RadialGradient(radius: 2.4, colors: [Colors.transparent, Couleurs.cyan.withValues(alpha: 0.06)]),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (ico != null) ...[Icone(ico!, taille: 18, lueur: true), const SizedBox(width: 10)],
+          Flexible(
+            child: Text(libelle, style: texte(taillePolice, graisse: 600), maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            if (ico != null) ...[Icone(ico!, taille: 18, lueur: true), const SizedBox(width: 10)],
-            Flexible(child: Text(libelle, style: texte(taillePolice, graisse: 600), maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ]),
-        ),
-      );
+        ],
+      ),
+    ),
+  );
 }
 
 /// Bouton fantôme : bordure fine colorée.
 class BoutonFantome extends StatelessWidget {
-  const BoutonFantome({super.key, required this.libelle, this.couleur = Couleurs.secondaire, this.bord = Couleurs.bordure, this.onTap, this.hauteur = 44});
+  const BoutonFantome({
+    super.key,
+    required this.libelle,
+    this.couleur = Couleurs.secondaire,
+    this.bord = Couleurs.bordure,
+    this.onTap,
+    this.hauteur = 44,
+  });
   final String libelle;
   final Color couleur;
   final Color bord;
@@ -363,15 +425,17 @@ class BoutonFantome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Carte(
-        rayon: 14,
-        bord: bord,
-        fond: const Color(0x990C1117),
-        onTap: onTap,
-        child: SizedBox(
-          height: hauteur - 2,
-          child: Center(child: Text(libelle, style: texte(15, graisse: 600, couleur: couleur))),
-        ),
-      );
+    rayon: 14,
+    bord: bord,
+    fond: const Color(0x990C1117),
+    onTap: onTap,
+    child: SizedBox(
+      height: hauteur - 2,
+      child: Center(
+        child: Text(libelle, style: texte(15, graisse: 600, couleur: couleur)),
+      ),
+    ),
+  );
 }
 
 /// « ‹ Appareils » : le retour, en pilule.
@@ -382,30 +446,40 @@ class BoutonRetour extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-        color: Couleurs.carte,
-        shape: const StadiumBorder(side: BorderSide(color: Couleurs.bordure)),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap ?? () => Navigator.of(context).maybePop(),
-          child: SizedBox(
-            height: 38,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(9, 0, 15, 0),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icone(Ico.retour, taille: 17, trait: 2),
-                const SizedBox(width: 6),
-                Text(libelle, style: texte(14)),
-              ]),
-            ),
+    color: Couleurs.carte,
+    shape: const StadiumBorder(side: BorderSide(color: Couleurs.bordure)),
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      onTap: onTap ?? () => Navigator.of(context).maybePop(),
+      child: SizedBox(
+        height: 38,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(9, 0, 15, 0),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icone(Ico.retour, taille: 17, trait: 2),
+              const SizedBox(width: 6),
+              Text(libelle, style: texte(14)),
+            ],
           ),
         ),
-      );
+      ),
+    ),
+  );
 }
 
 /// L'interrupteur principal, 54 × 32 : dégradé cyan et halo quand il est
 /// activé ; piste #1A222B et bouton #7C8894 sinon.
 class Interrupteur extends StatelessWidget {
-  const Interrupteur({super.key, required this.valeur, required this.onChanged, this.largeur = 54, this.hauteur = 32, this.libelle = 'Tunnel'});
+  const Interrupteur({
+    super.key,
+    required this.valeur,
+    required this.onChanged,
+    this.largeur = 54,
+    this.hauteur = 32,
+    this.libelle = 'Tunnel',
+  });
   final String libelle;
   final bool valeur;
 
@@ -430,36 +504,38 @@ class Interrupteur extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           opacity: bloque ? 0.45 : 1,
           child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOutCubic,
-            width: largeur,
-            height: hauteur,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(hauteur / 2),
-              gradient: valeur ? Couleurs.degrade : const LinearGradient(colors: [Couleurs.separateur, Couleurs.separateur]),
-              border: Border.all(color: valeur ? Colors.transparent : Couleurs.bordure),
-              boxShadow: valeur ? [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.65), blurRadius: 18, spreadRadius: -2)] : const [],
-            ),
-            child: AnimatedAlign(
+            padding: const EdgeInsets.all(6),
+            child: AnimatedContainer(
               duration: const Duration(milliseconds: 260),
               curve: Curves.easeOutCubic,
-              alignment: valeur ? Alignment.centerRight : Alignment.centerLeft,
-              child: AnimatedContainer(
+              width: largeur,
+              height: hauteur,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(hauteur / 2),
+                gradient: valeur ? Couleurs.degrade : const LinearGradient(colors: [Couleurs.separateur, Couleurs.separateur]),
+                border: Border.all(color: valeur ? Colors.transparent : Couleurs.bordure),
+                boxShadow: valeur
+                    ? [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.65), blurRadius: 18, spreadRadius: -2)]
+                    : const [],
+              ),
+              child: AnimatedAlign(
                 duration: const Duration(milliseconds: 260),
-                margin: const EdgeInsets.symmetric(horizontal: 2),
-                width: d,
-                height: d,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: valeur ? Couleurs.texte : Couleurs.tertiaire,
-                  boxShadow: valeur ? [const BoxShadow(color: Color(0x80001E32), blurRadius: 5, offset: Offset(0, 1))] : null,
+                curve: Curves.easeOutCubic,
+                alignment: valeur ? Alignment.centerRight : Alignment.centerLeft,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 260),
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  width: d,
+                  height: d,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: valeur ? Couleurs.texte : Couleurs.tertiaire,
+                    boxShadow: valeur ? [const BoxShadow(color: Color(0x80001E32), blurRadius: 5, offset: Offset(0, 1))] : null,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
         ),
       ),
     );
@@ -498,31 +574,52 @@ class LigneReglage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        child: Container(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: dense ? 10 : 12),
-          decoration: BoxDecoration(border: separateur ? const Border(bottom: BorderSide(color: Couleurs.separateur)) : null),
-          child: Row(children: [
-            Icone(ico, couleur: couleurIco, taille: 19, lueur: true),
-            const SizedBox(width: 13),
-            Expanded(
-              child: sousTitre == null
-                  ? Text(libelle, style: texte(15, couleur: couleurTexte), maxLines: 1, overflow: TextOverflow.ellipsis)
-                  : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(libelle, style: texte(15, couleur: couleurTexte), maxLines: 1, overflow: TextOverflow.ellipsis),
+    onTap: onTap,
+    child: Container(
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: dense ? 10 : 12),
+      decoration: BoxDecoration(
+        border: separateur ? const Border(bottom: BorderSide(color: Couleurs.separateur)) : null,
+      ),
+      child: Row(
+        children: [
+          Icone(ico, couleur: couleurIco, taille: 19, lueur: true),
+          const SizedBox(width: 13),
+          Expanded(
+            child: sousTitre == null
+                ? Text(
+                    libelle,
+                    style: texte(15, couleur: couleurTexte),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        libelle,
+                        style: texte(15, couleur: couleurTexte),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       const SizedBox(height: 2),
                       Text(sousTitre!, style: texte(12.5, couleur: Couleurs.secondaire, hauteur: 1.3)),
-                    ]),
+                    ],
+                  ),
+          ),
+          if (valeur != null) ...[
+            const SizedBox(width: 10),
+            Text(
+              valeur!,
+              style: valeurMono
+                  ? mono(13.5, graisse: 400, couleur: Couleurs.etiquette)
+                  : texte(13.5, couleur: Couleurs.etiquette),
             ),
-            if (valeur != null) ...[
-              const SizedBox(width: 10),
-              Text(valeur!,
-                  style: valeurMono ? mono(13.5, graisse: 400, couleur: Couleurs.etiquette) : texte(13.5, couleur: Couleurs.etiquette)),
-            ],
-            if (fin != null) ...[const SizedBox(width: 8), fin!],
-          ]),
-        ),
-      );
+          ],
+          if (fin != null) ...[const SizedBox(width: 8), fin!],
+        ],
+      ),
+    ),
+  );
 }
 
 /// Un bloc de lignes, sous son étiquette.
@@ -533,12 +630,12 @@ class Groupe extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(padding: const EdgeInsets.fromLTRB(6, 0, 6, 8), child: Etiquette(titre)),
-          Carte(child: Column(children: enfants)),
-        ],
-      );
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Padding(padding: const EdgeInsets.fromLTRB(6, 0, 6, 8), child: Etiquette(titre)),
+      Carte(child: Column(children: enfants)),
+    ],
+  );
 }
 
 /// Le chevron « › » des lignes cliquables.
@@ -556,17 +653,17 @@ class Compteur extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        constraints: const BoxConstraints(minWidth: 24),
-        height: 24,
-        padding: const EdgeInsets.symmetric(horizontal: 7),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: couleur,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [BoxShadow(color: couleur.withValues(alpha: 0.5), blurRadius: 10, spreadRadius: -2)],
-        ),
-        child: Text('$n', style: texte(12.5, graisse: 700, couleur: Colors.white)),
-      );
+    constraints: const BoxConstraints(minWidth: 24),
+    height: 24,
+    padding: const EdgeInsets.symmetric(horizontal: 7),
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: couleur,
+      borderRadius: BorderRadius.circular(12),
+      boxShadow: [BoxShadow(color: couleur.withValues(alpha: 0.5), blurRadius: 10, spreadRadius: -2)],
+    ),
+    child: Text('$n', style: texte(12.5, graisse: 700, couleur: Colors.white)),
+  );
 }
 
 /// Les coins de visée d'un cadre.
@@ -619,12 +716,18 @@ class SansDefilement extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-        builder: (context, c) => FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: alignement,
-          child: SizedBox(width: c.maxWidth, child: child),
-        ),
-      );
+    builder: (context, c) => MediaQuery.viewInsetsOf(context).bottom > 0
+        // Clavier ouvert, la hauteur fond : réduire rendrait tout
+        // minuscule. On défile, à taille normale.
+        ? SingleChildScrollView(
+            child: SizedBox(width: c.maxWidth, child: child),
+          )
+        : FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: alignement,
+            child: SizedBox(width: c.maxWidth, child: child),
+          ),
+  );
 }
 
 /// Le fond des écrans : dégradé radial #07131C → #04060A et grille de
@@ -657,11 +760,12 @@ class _PeintreFond extends CustomPainter {
       canvas.translate(c.dx, c.dy);
       canvas.scale(1, ry / rx);
       canvas.drawCircle(
-          Offset.zero,
-          rx,
-          Paint()
-            ..shader = ui.Gradient.radial(Offset.zero, rx, couleurs, arrets)
-            ..blendMode = mode ?? BlendMode.srcOver);
+        Offset.zero,
+        rx,
+        Paint()
+          ..shader = ui.Gradient.radial(Offset.zero, rx, couleurs, arrets)
+          ..blendMode = mode ?? BlendMode.srcOver,
+      );
       canvas.restore();
     }
 
@@ -678,7 +782,13 @@ class _PeintreFond extends CustomPainter {
     for (var y = 0.0; y < size.height; y += 24) {
       canvas.drawLine(Offset(0, y + 0.5), Offset(size.width, y + 0.5), trait);
     }
-    ellipse(size.width * etendue.width, size.height * etendue.height, const [Colors.black, Colors.transparent], const [0, 1], BlendMode.dstIn);
+    ellipse(
+      size.width * etendue.width,
+      size.height * etendue.height,
+      const [Colors.black, Colors.transparent],
+      const [0, 1],
+      BlendMode.dstIn,
+    );
     // Hors de l'ellipse, le masque doit aussi effacer la grille.
     canvas.save();
     final trou = Path()

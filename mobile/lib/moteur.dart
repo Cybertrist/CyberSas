@@ -96,6 +96,14 @@ abstract final class Moteur {
   /// Signe ces appareils avec la clé du coffre. Juste après l'empreinte.
   static Future<int> signer(String cles) async => await _appel<int>('signer', {'cles': cles}) ?? 0;
 
+  /// Admin : révoque ces appareils avec la clé du verrou (sortie du coffre
+  /// après l'empreinte). Rend la version de la nouvelle liste.
+  static Future<int> revoquer(String cles) async => await _appel<int>('revoquer', {'cles': cles}) ?? 0;
+
+  /// Admin : un lien d'invitation pour un membre de l'équipe.
+  static Future<String> inviter(String utilisateur, int minutes) async =>
+      await _appel<String>('inviter', {'utilisateur': utilisateur, 'minutes': minutes}) ?? '';
+
   /// Admin : retire un appareil du serveur.
   static Future<void> retirer(String cle) => _appel<void>('retirer', {'cle': cle});
 

@@ -5,9 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"time"
 
+	"github.com/Cybertrist/CyberSas/internal/b64"
 	"github.com/Cybertrist/CyberSas/internal/base"
 	"github.com/Cybertrist/CyberSas/internal/protocole"
+	"github.com/Cybertrist/CyberSas/internal/verrou"
 )
 
 // Les routes qui servent l'appli au-delà du tunnel : le nom affiché de son
@@ -165,4 +171,107 @@ func (s *Serveur) retrait(w http.ResponseWriter, r *http.Request) {
 		s.journal.Error("synchronisation après retrait", "evenement", "synchronisation", "erreur", err)
 	}
 	repondre(w, http.StatusOK, map[string]string{"etat": "retiré"})
+}
+
+// invitation : une clé d'inscription pour un membre de l'équipe, comme
+// « sas.sh invitation ». On n'invite que quelqu'un qui est déjà dans
+// equipe.txt : l'appli ne change pas l'équipe.
+func (s *Serveur) invitation(w http.ResponseWriter, r *http.Request) {
+	moi, ok := s.admin(w, r)
+	if !ok {
+		return
+	}
+	var d protocole.DemandeInvitation
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&d); err != nil {
+		refuser(w, http.StatusBadRequest, "demande illisible")
+		return
+	}
+	qui := strings.ToLower(strings.TrimSpace(d.Utilisateur))
+	if s.chargerEquipe()[qui] == "" {
+		refuser(w, http.StatusBadRequest, texteCourt(qui, 80)+" n'est pas dans l'équipe")
+		return
+	}
+	minutes := 10
+	if d.Minutes != 0 {
+		minutes = min(max(d.Minutes, 1), 24*60)
+	}
+	cle, expire := base.NouvelleCle(), time.Now().Add(time.Duration(minutes)*time.Minute)
+	if err := s.base.CreerCle(cle, "", qui, "", expire); err != nil {
+		refuser(w, http.StatusInternalServerError, "invitation impossible")
+		return
+	}
+	s.journal.Info("invitation créée", "evenement", "invitation", "pour", qui, "minutes", minutes, "par", moi.Nom)
+	repondre(w, http.StatusOK, protocole.ReponseInvitation{Cle: cle, Expire: expire})
+}
+
+// revocations : la liste de révocation signée sur le téléphone de l'admin.
+// Elle doit être signée par le verrou, plus récente que celle en vigueur,
+// et la contenir tout entière : une liste ne fait que s'allonger. Les
+// appareils révoqués sont aussi retirés de la base.
+func (s *Serveur) revocations(w http.ResponseWriter, r *http.Request) {
+	moi, ok := s.admin(w, r)
+	if !ok {
+		return
+	}
+	pub, _ := s.verrou()
+	if pub == nil {
+		refuser(w, http.StatusConflict, "ce réseau n'a pas de verrou")
+		return
+	}
+	if s.cfg.RevocationsAppli == "" {
+		refuser(w, http.StatusConflict, "révocation depuis l'appli désactivée")
+		return
+	}
+	var l protocole.ListeRevocations
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&l); err != nil {
+		refuser(w, http.StatusBadRequest, "demande illisible")
+		return
+	}
+	var cles [][32]byte
+	for _, c := range l.Cles {
+		k, err := b64.Cle32(c)
+		if err != nil {
+			refuser(w, http.StatusBadRequest, "clé illisible")
+			return
+		}
+		if c == moi.ClePublique {
+			refuser(w, http.StatusBadRequest, "on ne révoque pas son propre appareil")
+			return
+		}
+		cles = append(cles, k)
+	}
+	sig, err := b64.Decoder(l.Signature)
+	if err != nil || !verrou.VerifierRevocations(pub, l.Version, cles, sig) {
+		refuser(w, http.StatusBadRequest, "liste mal signée")
+		return
+	}
+	if actuelle := s.Revocations(); actuelle != nil {
+		if l.Version <= actuelle.Version {
+			refuser(w, http.StatusConflict, "liste plus ancienne que celle en vigueur")
+			return
+		}
+		for _, c := range actuelle.Cles {
+			if !slices.Contains(l.Cles, c) {
+				refuser(w, http.StatusBadRequest, "la nouvelle liste oublie une clé déjà révoquée")
+				return
+			}
+		}
+	}
+	b, _ := json.Marshal(l)
+	tmp := s.cfg.RevocationsAppli + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil || os.Rename(tmp, s.cfg.RevocationsAppli) != nil {
+		refuser(w, http.StatusInternalServerError, "liste non enregistrée")
+		return
+	}
+	retires := 0
+	for _, c := range l.Cles {
+		if a, err := s.base.ParCle(c); err == nil && s.base.Supprimer(a.ID) == nil {
+			retires++
+		}
+	}
+	s.journal.Warn("révocations reçues", "evenement", "revocation", "version", l.Version, "cles", len(l.Cles), "retires", retires, "par", moi.Nom)
+	if err := s.Synchroniser(); err != nil {
+		s.journal.Error("synchronisation après révocation", "evenement", "synchronisation", "erreur", err)
+	}
+	repondre(w, http.StatusOK, map[string]uint64{"version": l.Version})
 }

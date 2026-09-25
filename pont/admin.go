@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -191,4 +193,83 @@ func Reseau(dossier string) (string, error) {
 		return "", err
 	}
 	return vueJSON(appareil.Vue{Reseau: r, Ecartes: ecartes}, false, "", time.Now()), nil
+}
+
+// Inviter : un lien d'invitation pour un membre de l'équipe, comme
+// « sas.sh invitation » : cybersas://rejoindre?serveur=…&cle=…&verrou=…
+// (et l'autorité du labo, s'il y en a une). La clé vaut minutes minutes,
+// une seule fois.
+func Inviter(dossier, utilisateur string, minutes int) (string, error) {
+	e, err := appareil.Stockage{Dossier: dossier}.Lire()
+	if err != nil {
+		return "", errors.New("pas inscrit")
+	}
+	var r protocole.ReponseInvitation
+	if err := appel(dossier, "POST", protocole.CheminInvitation, protocole.DemandeInvitation{Utilisateur: utilisateur, Minutes: minutes}, &r); err != nil {
+		return "", err
+	}
+	v := url.Values{"serveur": {e.Serveur}, "cle": {r.Cle}, "verrou": {e.Retenu.Verrou}}
+	if e.Autorite != "" {
+		v.Set("autorite", base64.StdEncoding.EncodeToString([]byte(e.Autorite)))
+	}
+	return "cybersas://rejoindre?" + v.Encode(), nil
+}
+
+// Revoquer ajoute les clés (séparées par des virgules) à la liste de
+// révocation, la signe avec la clé du verrou et l'envoie au serveur. On
+// part de la liste servie et de celle que cet appareil a déjà retenue :
+// la nouvelle les contient toutes deux, avec une version au-dessus.
+// Rend la nouvelle version.
+func Revoquer(dossier, graine, cles string) (int, error) {
+	prive, err := lireVerrou(dossier, graine)
+	if err != nil {
+		return 0, err
+	}
+	e, err := appareil.Stockage{Dossier: dossier}.Lire()
+	if err != nil {
+		return 0, errors.New("pas inscrit")
+	}
+	a, err := api(e.Serveur, e.Autorite)
+	if err != nil {
+		return 0, err
+	}
+	r, err := appareil.LireReseau(a, e)
+	if err != nil {
+		return 0, err
+	}
+	version := e.Retenu.VersionRevocations
+	liste := slices.Clone(e.Retenu.Revoquees)
+	if l := r.Revocations; l != nil {
+		version = max(version, l.Version)
+		for _, c := range l.Cles {
+			if !slices.Contains(liste, c) {
+				liste = append(liste, c)
+			}
+		}
+	}
+	nouvelles := 0
+	for _, c := range strings.Split(cles, ",") {
+		if c = strings.TrimSpace(c); c != "" && !slices.Contains(liste, c) {
+			liste = append(liste, c)
+			nouvelles++
+		}
+	}
+	if nouvelles == 0 {
+		return 0, errors.New("déjà révoqué")
+	}
+	var brutes [][32]byte
+	for _, c := range liste {
+		k, err := b64.Cle32(c)
+		if err != nil {
+			return 0, errors.New("clé illisible dans la liste de révocation")
+		}
+		brutes = append(brutes, k)
+	}
+	version++
+	l := protocole.ListeRevocations{Version: version, Cles: liste,
+		Signature: base64.StdEncoding.EncodeToString(verrou.SignerRevocations(prive, version, brutes))}
+	if err := appel(dossier, "POST", protocole.CheminRevocations, l, nil); err != nil {
+		return 0, err
+	}
+	return int(min(version, 1<<31)), nil
 }

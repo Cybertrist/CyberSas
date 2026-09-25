@@ -111,6 +111,15 @@ class MainActivity : FlutterFragmentActivity() {
                     val cles = appel.argument<String>("cles") ?: ""
                     enArriere(reponse) { Pont.signer(dossier.path, Coffre.lire(this), cles) }
                 }
+                "revoquer" -> {
+                    val cles = appel.argument<String>("cles") ?: ""
+                    enArriere(reponse) { Pont.revoquer(dossier.path, Coffre.lire(this), cles) }
+                }
+                "inviter" -> {
+                    val qui = appel.argument<String>("utilisateur") ?: ""
+                    val minutes = appel.argument<Int>("minutes") ?: 10
+                    enArriere(reponse) { Pont.inviter(dossier.path, qui, minutes.toLong()) }
+                }
                 "retirer" -> {
                     val cle = appel.argument<String>("cle") ?: ""
                     enArriere(reponse) { Pont.retirer(dossier.path, cle); null }

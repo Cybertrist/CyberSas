@@ -278,7 +278,9 @@ cmd_revoquer () {
   [ $# -ge 1 ] || meurt "usage : sas.sh revoquer <clé publique> [<clé>...]"
   local cles; cles="$(IFS=,; echo "$*")"
   local actuelle="$ETAT/sasd/revocations.json"
-  { [ -f "$actuelle" ] && cat "$actuelle"; true; } | verrou_admin revoquer --cle "$cles" > "$actuelle.tmp"
+  # On part de la liste en vigueur, qui peut venir de l'appli (plus récente
+  # que celle du dossier) ; serveur arrêté, de celle du dossier.
+  { docker compose exec -T sasd sasd revocations 2>/dev/null | grep . || { [ -f "$actuelle" ] && cat "$actuelle"; }; true; }     | verrou_admin revoquer --cle "$cles" > "$actuelle.tmp"
   mv "$actuelle.tmp" "$actuelle"
   ok "liste de révocation à jour : les appareils l'appliqueront d'ici dix secondes"
 }

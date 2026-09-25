@@ -258,6 +258,9 @@ class Reseau extends ChangeNotifier {
   String plage = '10.77.0.0/24';
   final protocole = 'Noise IK';
   String compte = 'Tristan';
+
+  /// L'adresse du compte (tristan@exemple.fr), pour s'inviter soi-même.
+  String courriel = '';
   bool admin = true;
 
   /// Cet appareil, d'après son inscription, avant que le moteur ait décrit
@@ -409,6 +412,7 @@ class Reseau extends ChangeNotifier {
     serveur = Uri.tryParse(i['serveur'] as String? ?? '')?.host ?? '';
     plage = i['reseau'] as String? ?? plage;
     compte = prenom(i['proprietaire'] as String? ?? '');
+    courriel = i['proprietaire'] as String? ?? '';
     admin = i['groupe'] == 'admins';
     cleVerrou = i['verrou'] as String? ?? '';
     _moiInscrit = Appareil(
@@ -573,6 +577,34 @@ class Reseau extends ChangeNotifier {
     return null;
   }
 
+  /// L'admin peut révoquer un appareil signé : il faut la clé du verrou.
+  bool peutRevoquer(Appareil a) => peutRetirer(a) && a.signe && (!reel || cleVerrouPresente);
+
+  /// Révoque [a] : la liste signée par le verrou le bannit pour tous les
+  /// appareils, et le serveur l'oublie. Rend l'erreur, ou null.
+  Future<String?> revoquerAppareil(Appareil a) async {
+    if (reel) {
+      try {
+        await Moteur.revoquer(a.cle);
+      } on ErreurMoteur catch (e) {
+        return e.message;
+      }
+    }
+    appareils.removeWhere((x) => x.adresse == a.adresse);
+    notifyListeners();
+    return null;
+  }
+
+  /// Un lien d'invitation pour [qui], valable [minutes]. Rend (lien, erreur).
+  Future<(String, String?)> inviter(String qui, int minutes) async {
+    if (!reel) return (CodeInvitation(serveur).charge, null);
+    try {
+      return (await Moteur.inviter(qui, minutes), null);
+    } on ErreurMoteur catch (e) {
+      return ('', e.message);
+    }
+  }
+
   bool peutRenommer(Appareil a) => reel ? (a.moi || admin) : (admin || a.proprietaire == compte.toLowerCase());
 
   /// Renomme [a]. Sur le vrai réseau, c'est le nom affiché qui change, tel
@@ -704,7 +736,7 @@ String duree(Duration d) {
 }
 
 /// La version affichée dans « À propos » (même valeur que pubspec.yaml).
-const versionAppli = '0.5.7';
+const versionAppli = '0.6.0';
 
 /// « tristan.joncour@gmail.com » → « Tristan » : de quoi nommer quelqu'un
 /// sans son nom complet.

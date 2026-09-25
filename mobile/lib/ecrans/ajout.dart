@@ -52,8 +52,6 @@ class _EcranAjoutState extends State<EcranAjout> {
 
   @override
   Widget build(BuildContext context) {
-    // Le vrai serveur ne sait pas encore créer d'invitation depuis l'appli :
-    // pas de faux code ici, mais le moyen d'en créer une vraie.
     if (EtatReseau.of(context).reel) return const _AjoutReel();
     final reste = _reste;
     final expiree = reste == Duration.zero;
@@ -250,57 +248,228 @@ class _Pastille extends StatelessWidget {
   }
 }
 
-/// En attendant que l'appli crée les invitations : comment en faire une.
-class _AjoutReel extends StatelessWidget {
+/// La vraie invitation : l'admin dit pour qui et pour combien de temps, le
+/// serveur crée la clé, et le téléphone en fait le lien cybersas://.
+class _AjoutReel extends StatefulWidget {
   const _AjoutReel();
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        body: Fond(
-          child: SafeArea(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 480),
-                child: ListView(padding: const EdgeInsets.fromLTRB(16, 6, 16, 20), children: [
+  State<_AjoutReel> createState() => _AjoutReelState();
+}
+
+class _AjoutReelState extends State<_AjoutReel> {
+  late final _qui = TextEditingController(text: EtatReseau.of(context).courriel);
+  static const _durees = [(10, '10 min'), (60, '1 h'), (24 * 60, '24 h')];
+  int _minutes = 10;
+  String _lien = '';
+  DateTime _expire = DateTime.now();
+  String? _erreur;
+  bool _enCours = false;
+  Timer? _horloge;
+
+  @override
+  void dispose() {
+    _qui.dispose();
+    _horloge?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _creer() async {
+    if (_enCours) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _enCours = true;
+      _erreur = null;
+    });
+    final (lien, e) = await EtatReseau.of(context).inviter(_qui.text.trim(), _minutes);
+    if (!mounted) return;
+    setState(() {
+      _enCours = false;
+      _erreur = e;
+      _lien = lien;
+      _expire = DateTime.now().add(Duration(minutes: _minutes));
+    });
+    _horloge?.cancel();
+    if (e == null) _horloge = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+  }
+
+  String get _duree => _durees.firstWhere((d) => d.$1 == _minutes).$2;
+
+  Future<void> _partager() => SharePlus.instance.share(ShareParams(
+        subject: 'Invitation CyberSas',
+        text: 'Rejoins mon réseau CyberSas : ouvre ce lien sur ton appareil, où CyberSas est installé '
+            '(usage unique, valable $_duree).\n$_lien',
+      ));
+
+  @override
+  Widget build(BuildContext context) {
+    final r = EtatReseau.of(context);
+    final reste = _expire.difference(DateTime.now());
+    final expiree = _lien.isNotEmpty && reste.isNegative;
+    final h = reste.inHours;
+    final mm = (reste.inMinutes % 60).toString().padLeft(2, '0');
+    final ss = (reste.inSeconds % 60).toString().padLeft(2, '0');
+
+    final Widget corps;
+    if (!r.admin) {
+      corps = Carte(
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text("Seul un admin peut inviter", style: texte(16, graisse: 600)),
+          const SizedBox(height: 8),
+          Text(
+            "Demande une invitation à l'admin du réseau : un lien cybersas:// à ouvrir sur le nouvel appareil.",
+            style: texte(13.5, couleur: Couleurs.secondaire, hauteur: 1.45),
+          ),
+        ]),
+      );
+    } else if (_lien.isEmpty) {
+      corps = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Carte(
+          padding: const EdgeInsets.fromLTRB(16, 12, 14, 12),
+          child: Row(children: [
+            const Icone(Ico.etiquette, taille: 20),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text("Pour qui (son adresse Google)", style: texte(12.5, couleur: Couleurs.secondaire)),
+                const SizedBox(height: 3),
+                TextField(
+                  controller: _qui,
+                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
+                  style: texte(16, graisse: 500),
+                  cursorColor: Couleurs.cyan,
+                  decoration: InputDecoration.collapsed(hintText: 'prenom@gmail.com', hintStyle: texte(16, couleur: Couleurs.tertiaire)),
+                ),
+              ]),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Text("Ton adresse pour un appareil à toi. La personne doit déjà faire partie de l'équipe.",
+              style: texte(12.5, couleur: Couleurs.tertiaire, hauteur: 1.4)),
+        ),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Text('Valable', style: texte(12.5, couleur: Couleurs.secondaire)),
+        ),
+        const SizedBox(height: 8),
+        Row(children: [
+          for (final d in _durees) ...[
+            Expanded(
+              child: Carte(
+                rayon: 14,
+                fond: d.$1 == _minutes ? Couleurs.cyan.withValues(alpha: 0.12) : Couleurs.carte,
+                bord: d.$1 == _minutes ? Couleurs.cyan.withValues(alpha: 0.5) : Couleurs.bordure,
+                onTap: () => setState(() => _minutes = d.$1),
+                child: SizedBox(
+                  height: 42,
+                  child: Center(
+                    child: Text(d.$2, style: texte(14.5, graisse: 600, couleur: d.$1 == _minutes ? Couleurs.cyan : Couleurs.secondaire)),
+                  ),
+                ),
+              ),
+            ),
+            if (d != _durees.last) const SizedBox(width: 10),
+          ],
+        ]),
+        if (_erreur != null) ...[
+          const SizedBox(height: 14),
+          Text(_erreur!, style: texte(13.5, couleur: Couleurs.rougeClair, hauteur: 1.4)),
+        ],
+      ]);
+    } else {
+      // Avec l'autorité du labo, le lien est trop long pour un QR lisible :
+      // on le partage.
+      final qr = _lien.length <= 700;
+      corps = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Bordee(
+          bordure: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0x9931E7FD), Couleurs.bordure, Color(0x7301B9FD)],
+            stops: [0, 0.45, 1],
+          ),
+          fond: const Color(0xEB090F16),
+          rayon: 24,
+          halo: [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.6), blurRadius: 34, spreadRadius: -14)],
+          padding: const EdgeInsets.fromLTRB(18, 20, 18, 16),
+          child: Column(children: [
+            if (qr)
+              AnimatedOpacity(
+                duration: const Duration(milliseconds: 300),
+                opacity: expiree ? 0.25 : 1,
+                child: _Qr(charge: _lien),
+              )
+            else
+              Text('Invitation prête pour ${_qui.text.trim()}',
+                  textAlign: TextAlign.center, style: texte(15.5, graisse: 600, couleur: expiree ? Couleurs.tertiaire : Couleurs.texte)),
+            const SizedBox(height: 12),
+            if (expiree)
+              TextButton(
+                onPressed: () => setState(() => _lien = ''),
+                style: TextButton.styleFrom(foregroundColor: Couleurs.cyan),
+                child: Text('Invitation expirée · en créer une autre', style: texte(13, graisse: 600, couleur: Couleurs.cyan)),
+              )
+            else
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                const Icone(Ico.horloge, couleur: Couleurs.secondaire, taille: 13, trait: 2),
+                const SizedBox(width: 6),
+                Text('Expire dans ${h > 0 ? '$h h ' : ''}$mm:$ss · une seule fois', style: texte(12.5, couleur: Couleurs.secondaire)),
+              ]),
+          ]),
+        ),
+        const SizedBox(height: 14),
+        const _Etapes(),
+      ]);
+    }
+
+    final bouton = !r.admin
+        ? null
+        : _lien.isEmpty
+            ? BoutonContour(libelle: _enCours ? 'Création…' : "Créer l'invitation", ico: Ico.plus, hauteur: 52, onTap: _creer)
+            : BoutonContour(libelle: "Partager l'invitation", ico: Ico.partage, hauteur: 52, onTap: expiree ? null : _partager);
+
+    return Scaffold(
+      body: Fond(
+        centre: const Alignment(0, -0.32),
+        etendue: const Size(0.7, 0.3),
+        child: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 20),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   const Align(alignment: Alignment.centerLeft, child: BoutonRetour('Appareils')),
-                  const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Text('Ajouter un appareil', style: titre(28)),
-                  ),
                   const SizedBox(height: 14),
-                  Carte(
-                    padding: const EdgeInsets.all(18),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text("L'invitation se crée sur le serveur", style: texte(16, graisse: 600)),
-                      const SizedBox(height: 8),
-                      Text(
-                        "Pour l'instant, c'est le serveur qui fabrique les invitations. Sur sa machine, lance :",
-                        style: texte(13.5, couleur: Couleurs.secondaire, hauteur: 1.45),
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Couleurs.bloc,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Couleurs.bordure),
+                  Expanded(
+                    child: SansDefilement(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text('Ajouter un appareil', style: titre(28)),
+                            const SizedBox(height: 8),
+                            Text('Une invitation à usage unique.', style: texte(13.5, couleur: Couleurs.secondaire)),
+                          ]),
                         ),
-                        child: Text('bash scripts/sas.sh invitation <email>', style: mono(13, graisse: 400, couleur: Couleurs.cyan)),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        "Envoie le lien cybersas:// à la personne. Il vaut dix minutes, une seule fois, et elle doit déjà "
-                        "faire partie de l'équipe. Une fois qu'elle l'a ouvert, signe son appareil après avoir comparé l'empreinte.",
-                        style: texte(13.5, couleur: Couleurs.secondaire, hauteur: 1.45),
-                      ),
-                    ]),
+                        const SizedBox(height: 14),
+                        corps,
+                      ]),
+                    ),
                   ),
+                  if (bouton != null) ...[const SizedBox(height: 14), bouton],
                 ]),
               ),
             ),
           ),
         ),
-      );
+      ),
+    );
+  }
 }

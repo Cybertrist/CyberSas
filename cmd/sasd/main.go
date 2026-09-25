@@ -12,7 +12,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -66,6 +65,7 @@ func config() reglages {
 	if err != nil || port == 0 {
 		meurt("SAS_PORT invalide : %q", os.Getenv("SAS_PORT"))
 	}
+	etat := env("SAS_ETAT", "/var/lib/sasd")
 	return reglages{
 		Config: serveur.Config{
 			Domaine:            domaine,
@@ -77,11 +77,12 @@ func config() reglages {
 			Politique:          env("SAS_POLITIQUE", "/politique/politique.json"),
 			SignaturePolitique: env("SAS_SIGNATURE_POLITIQUE", "/politique/politique.sig"),
 			Revocations:        env("SAS_REVOCATIONS", "/config/revocations.json"),
+			RevocationsAppli:   filepath.Join(etat, "revocations.json"),
 			ClientsGoogle:      env("SAS_CLIENTS_GOOGLE", "/config/clients_google"),
 			Verrou:             env("SAS_VERROU", "/config/verrou.pub"),
 			DureeAppareil:      30 * 24 * time.Hour,
 		},
-		etat:   env("SAS_ETAT", "/var/lib/sasd"),
+		etat:   etat,
 		ecoute: env("SAS_ECOUTE", "127.0.0.1:8080"),
 		port:   int(port),
 	}
@@ -106,6 +107,12 @@ func main() {
 			cmdAppareils(b, cfg, os.Args[2:])
 		case "signatures":
 			cmdSignatures(b, cfg)
+		case "revocations":
+			// La liste en vigueur, pour que « sas.sh revoquer » parte de la
+			// dernière, même quand elle vient de l'appli.
+			if l := serveur.RevocationsEnVigueur(cfg.Revocations, cfg.RevocationsAppli); l != nil {
+				json.NewEncoder(os.Stdout).Encode(l)
+			}
 		case "retirer":
 			if len(os.Args) != 3 {
 				meurt("usage : sasd retirer <nom>")
@@ -137,9 +144,7 @@ func cmdCle(b *base.Base, args []string) {
 	if *nom != "" && *etiquette == "" {
 		meurt("--nom ne vaut que pour une machine : un appareil personnel porte le nom de son propriétaire")
 	}
-	brut := make([]byte, 24)
-	rand.Read(brut)
-	cle := "sas-" + base64.RawURLEncoding.EncodeToString(brut)
+	cle := base.NouvelleCle()
 	if err := b.CreerCle(cle, *etiquette, *utilisateur, *nom, time.Now().Add(*duree)); err != nil {
 		meurt("%v", err)
 	}

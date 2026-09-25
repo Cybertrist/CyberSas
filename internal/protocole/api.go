@@ -28,6 +28,11 @@ const (
 	CheminAppareils  = "/api/v1/appareils"
 	CheminSignatures = "/api/v1/signatures"
 	CheminRetrait    = "/api/v1/retrait"
+	// CheminInvitation : un admin crée une clé d'inscription pour un membre
+	// de l'équipe. CheminRevocations : il envoie la liste de révocation
+	// qu'il vient de signer sur son téléphone.
+	CheminInvitation  = "/api/v1/invitation"
+	CheminRevocations = "/api/v1/revocations"
 )
 
 // DemandeLibelle : le nouveau nom affiché. ClePublique désigne un autre
@@ -132,6 +137,18 @@ type ListeRevocations struct {
 	Version   uint64   `json:"version"`
 	Cles      []string `json:"cles"`
 	Signature string   `json:"signature"`
+}
+
+// DemandeInvitation : pour qui, et combien de minutes la clé vaut.
+type DemandeInvitation struct {
+	Utilisateur string `json:"utilisateur"`
+	Minutes     int    `json:"minutes"`
+}
+
+// ReponseInvitation : la clé d'inscription, à usage unique.
+type ReponseInvitation struct {
+	Cle    string    `json:"cle"`
+	Expire time.Time `json:"expire"`
 }
 
 type Erreur struct {

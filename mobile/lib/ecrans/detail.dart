@@ -466,8 +466,9 @@ Future<void> renommerAppareil(BuildContext context, Appareil a) async {
 }
 
 /// « Retirer du réseau », pour l'admin : une confirmation, puis l'empreinte.
-/// Le serveur oublie l'appareil ; pour un appareil volé, il faudra aussi le
-/// révoquer avec le verrou (sinon il pourrait refaire une demande).
+/// Le serveur oublie l'appareil. Signé, et la clé du verrou sur ce
+/// téléphone : « Révoquer », qui le bannit aussi pour de bon (la liste de
+/// révocation est signée par le verrou, et chaque appareil la vérifie).
 class _BoutonRetirer extends StatelessWidget {
   const _BoutonRetirer({required this.a, this.apres});
   final Appareil a;
@@ -476,6 +477,7 @@ class _BoutonRetirer extends StatelessWidget {
   Future<void> _retirer(BuildContext context) async {
     final r = EtatReseau.of(context);
     final messager = ScaffoldMessenger.of(context);
+    final revoquer = r.peutRevoquer(a);
     final oui = await showDialog<bool>(
       context: context,
       barrierColor: const Color(0xA8020407),
@@ -490,10 +492,12 @@ class _BoutonRetirer extends StatelessWidget {
             rayon: 24,
             padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text('Retirer ${a.nomAffiche} ?', style: texte(20, graisse: 600, espacement: -0.4)),
+              Text('${revoquer ? 'Révoquer' : 'Retirer'} ${a.nomAffiche} ?', style: texte(20, graisse: 600, espacement: -0.4)),
               const SizedBox(height: 8),
               Text(
-                "Il quitte le réseau tout de suite : plus aucun appareil ne le voit. Pour revenir, il devra refaire une demande et être signé à nouveau.",
+                revoquer
+                    ? "Sa clé est bannie pour de bon, signée par le verrou : aucun appareil ne l'acceptera plus, même si le serveur était piraté. Pour revenir, il lui faudra une nouvelle invitation, avec une nouvelle clé."
+                    : "Il quitte le réseau tout de suite : plus aucun appareil ne le voit. Pour revenir, il devra refaire une demande et être signé à nouveau.",
                 style: texte(14, couleur: Couleurs.secondaire, hauteur: 1.4),
               ),
               const SizedBox(height: 20),
@@ -502,7 +506,7 @@ class _BoutonRetirer extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: BoutonFantome(
-                    libelle: 'Retirer',
+                    libelle: revoquer ? 'Révoquer' : 'Retirer',
                     couleur: Couleurs.rougeClair,
                     bord: Couleurs.rouge.withValues(alpha: 0.45),
                     onTap: () => Navigator.pop(context, true),
@@ -515,15 +519,15 @@ class _BoutonRetirer extends StatelessWidget {
       ),
     );
     if (oui != true) return;
-    if (await confirmerIdentite('Retirer ${a.nomAffiche}') != Identite.confirmee) return;
-    final e = await r.retirerAppareil(a);
-    messager.showSnackBar(SnackBar(content: Text(e ?? '${a.nomAffiche} retiré du réseau')));
+    if (await confirmerIdentite('${revoquer ? 'Révoquer' : 'Retirer'} ${a.nomAffiche}') != Identite.confirmee) return;
+    final e = revoquer ? await r.revoquerAppareil(a) : await r.retirerAppareil(a);
+    messager.showSnackBar(SnackBar(content: Text(e ?? '${a.nomAffiche} ${revoquer ? 'révoqué' : 'retiré du réseau'}')));
     if (e == null) apres?.call();
   }
 
   @override
   Widget build(BuildContext context) => BoutonFantome(
-        libelle: 'Retirer du réseau',
+        libelle: EtatReseau.of(context).peutRevoquer(a) ? 'Révoquer' : 'Retirer du réseau',
         couleur: Couleurs.rougeClair,
         bord: Couleurs.rouge.withValues(alpha: 0.4),
         onTap: () => _retirer(context),

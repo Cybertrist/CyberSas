@@ -7,8 +7,10 @@
 package base
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
@@ -410,6 +412,13 @@ func adresseLibre(tx *sql.Tx, reseau netip.Prefix, serveur netip.Addr) (netip.Ad
 		}
 	}
 	return netip.Addr{}, ErrReseauPlein
+}
+
+// NouvelleCle : une clé d'inscription tirée au hasard (24 octets).
+func NouvelleCle() string {
+	brut := make([]byte, 24)
+	rand.Read(brut)
+	return "sas-" + base64.RawURLEncoding.EncodeToString(brut)
 }
 
 // CreerCle enregistre une clé d'inscription à usage unique. Pour une

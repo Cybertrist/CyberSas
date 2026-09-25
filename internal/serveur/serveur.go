@@ -51,7 +51,11 @@ type Config struct {
 	// bannies. Tous deux facultatifs, et relus à chaque demande.
 	SignaturePolitique string
 	Revocations        string
-	DureeAppareil      time.Duration
+	// RevocationsAppli : la liste signée sur le téléphone d'un admin, que
+	// le serveur garde dans son dossier de données (la configuration est en
+	// lecture seule). On sert la plus récente des deux.
+	RevocationsAppli string
+	DureeAppareil    time.Duration
 }
 
 type Serveur struct {
@@ -346,12 +350,33 @@ func (s *Serveur) documentsSignes(e *protocole.EtatReseau) {
 			e.PolitiqueVersion, e.PolitiqueSignature = sig.Version, sig.Signature
 		}
 	}
-	if b, err := os.ReadFile(s.cfg.Revocations); err == nil {
-		var r protocole.ListeRevocations
-		if json.Unmarshal(b, &r) == nil {
-			e.Revocations = &r
+	e.Revocations = s.Revocations()
+}
+
+// Revocations : la liste de révocation en vigueur, la plus récente de
+// celle de « sas.sh revoquer » et de celle venue de l'appli. Aucune : nil.
+func (s *Serveur) Revocations() *protocole.ListeRevocations {
+	return RevocationsEnVigueur(s.cfg.Revocations, s.cfg.RevocationsAppli)
+}
+
+// RevocationsEnVigueur : la plus récente des listes lisibles parmi ces
+// fichiers (les absents sont ignorés).
+func RevocationsEnVigueur(chemins ...string) *protocole.ListeRevocations {
+	var r *protocole.ListeRevocations
+	for _, chemin := range chemins {
+		if chemin == "" {
+			continue
+		}
+		b, err := os.ReadFile(chemin)
+		if err != nil {
+			continue
+		}
+		var l protocole.ListeRevocations
+		if json.Unmarshal(b, &l) == nil && (r == nil || l.Version > r.Version) {
+			r = &l
 		}
 	}
+	return r
 }
 
 // --- Google ------------------------------------------------------------------

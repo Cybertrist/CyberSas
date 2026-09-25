@@ -23,17 +23,14 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"net"
 	"net/netip"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -41,98 +38,44 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Cybertrist/CyberSas/internal/appareil"
 	"github.com/Cybertrist/CyberSas/internal/b64"
 	"github.com/Cybertrist/CyberSas/internal/client"
-	"github.com/Cybertrist/CyberSas/internal/noise"
 	"github.com/Cybertrist/CyberSas/internal/politique"
 	"github.com/Cybertrist/CyberSas/internal/protocole"
 	"github.com/Cybertrist/CyberSas/internal/tun"
-	"github.com/Cybertrist/CyberSas/internal/tunnel"
 	"github.com/Cybertrist/CyberSas/internal/verrou"
 )
 
-type etat struct {
-	Serveur     string                     `json:"serveur"`
-	ClePrivee   string                     `json:"cle_privee"`
-	Inscription protocole.ReponseConnexion `json:"inscription"`
-	// Retenu : ce que l'appareil a appris et ne laisse plus changer (clé du
-	// serveur, verrou, versions signées déjà vues, clés révoquées).
-	Retenu client.Retenu `json:"retenu"`
-}
-
-var dossier = func() string {
+// stockage : l'état de cet appareil, dans /var/lib/sas, lisible par root
+// seul (voir internal/appareil).
+var stockage = appareil.Stockage{Dossier: func() string {
 	if d := os.Getenv("SAS_ETAT"); d != "" {
 		return d
 	}
 	return "/var/lib/sas"
-}()
-
-func fichierEtat() string { return filepath.Join(dossier, "etat.json") }
+}()}
 
 func meurt(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "sas : "+format+"\n", args...)
 	os.Exit(1)
 }
 
-func lireEtat() (etat, error) {
-	var e etat
-	b, err := os.ReadFile(fichierEtat())
-	if err != nil {
-		return e, err
-	}
-	return e, json.Unmarshal(b, &e)
-}
-
-// ecrireEtat : fichier temporaire, synchronisé sur disque, puis renommé.
-// Une coupure de courant ne laisse jamais un état à moitié écrit, ce qui
-// ferait perdre la clé privée.
-func ecrireEtat(e etat) error {
-	if err := os.MkdirAll(dossier, 0o700); err != nil {
-		return err
-	}
-	if err := os.Chmod(dossier, 0o700); err != nil {
-		return err
-	}
-	b, _ := json.MarshalIndent(e, "", "  ")
-	tmp := fichierEtat() + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(b); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, fichierEtat()); err != nil {
-		return err
-	}
-	// Synchroniser le dossier fixe le renommage sur disque. Le fichier est
-	// déjà complet : un échec ici ne peut que ramener l'ancien état entier.
-	if d, err := os.Open(dossier); err == nil {
-		_ = d.Sync()
-		_ = d.Close()
-	}
-	return nil
-}
-
-// api : SAS_CA ajoute une autorité, celle du labo par exemple, aux racines
-// du système.
-func api(base string) *client.API {
+// nouvelleAPI : SAS_CA ajoute une autorité, celle du labo par exemple, aux
+// racines du système.
+func nouvelleAPI(base string) (*client.API, error) {
 	var ca []byte
 	if chemin := os.Getenv("SAS_CA"); chemin != "" {
 		var err error
 		if ca, err = os.ReadFile(chemin); err != nil {
-			meurt("autorité %s illisible", chemin)
+			return nil, fmt.Errorf("autorité %s illisible", chemin)
 		}
 	}
-	a, err := client.NouvelleAPI(base, ca)
+	return client.NouvelleAPI(base, ca)
+}
+
+func api(base string) *client.API {
+	a, err := nouvelleAPI(base)
 	if err != nil {
 		meurt("%v", err)
 	}
@@ -154,7 +97,7 @@ func main() {
 	case "appareils":
 		appareils()
 	case "etat":
-		e, err := lireEtat()
+		e, err := stockage.Lire()
 		if err != nil {
 			meurt("pas inscrit")
 		}
@@ -163,7 +106,7 @@ func main() {
 			e.Inscription.Reseau, client.EmpreinteVerrou(e.Retenu.Verrou))
 		fmt.Printf("clé publique : %s  (empreinte %s)\n", e.Retenu.MaCle, client.EmpreinteCle(e.Retenu.MaCle))
 	case "quitter":
-		e, err := lireEtat()
+		e, err := stockage.Lire()
 		if err != nil {
 			meurt("pas inscrit")
 		}
@@ -171,8 +114,8 @@ func main() {
 			fmt.Fprintf(os.Stderr, "sas : le serveur n'a pas confirmé (%v), l'état local est effacé quand même\n", err)
 		}
 		// La clé privée est dans ce fichier : s'il reste, le dire.
-		if err := os.Remove(fichierEtat()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			meurt("l'état local n'a pas pu être effacé (%v) : supprimer %s à la main", err, fichierEtat())
+		if err := stockage.Effacer(); err != nil {
+			meurt("l'état local n'a pas pu être effacé (%v) : supprimer %s à la main", err, stockage.Fichier())
 		}
 		fmt.Println("désinscrit")
 	case "verrou":
@@ -196,53 +139,15 @@ func rejoindre(args []string) {
 	if *serveur == "" || cle == "" {
 		meurt("il faut --serveur, et la clé d'inscription dans SAS_CLE")
 	}
-	// On garde la clé déjà générée : se réinscrire ne change pas d'adresse.
-	ancien, dejaInscrit := lireEtat()
-	var brut []byte
-	if k, err := b64.Decoder(ancien.ClePrivee); err == nil && len(k) == 32 {
-		brut = k
-	} else {
-		k, err := noise.GenererCle()
-		if err != nil {
-			meurt("%v", err)
-		}
-		brut = k.Bytes()
-	}
-	prive, _ := noise.ClePrivee(brut)
-	if *verrouAttendu == "" && dejaInscrit == nil {
-		*verrouAttendu = ancien.Retenu.Verrou
-	}
-	r, err := api(*serveur).Inscrire(prive, nom, runtime.GOOS, client.Justificatif{CleInscription: cle}, *verrouAttendu)
+	e, err := appareil.Rejoindre(stockage, api(*serveur), *serveur, client.Justificatif{CleInscription: cle},
+		appareil.Options{Nom: nom, Systeme: runtime.GOOS, VerrouAttendu: *verrouAttendu, Oublier: *oublier})
 	if err != nil {
-		meurt("inscription refusée : %v", err)
-	}
-	// Ce qu'on a retenu ne change pas sans qu'on le demande : un serveur
-	// piraté qui ferait se réinscrire l'appareil ne ferait pas disparaître le
-	// verrou pour autant.
-	if dejaInscrit == nil && !*oublier {
-		if ancien.Retenu.CleServeur != "" && ancien.Retenu.CleServeur != r.Serveur.ClePublique {
-			meurt("le serveur a changé de clé (%s, avant %s) : refus. --oublier pour l'accepter",
-				client.EmpreinteCle(r.Serveur.ClePublique), client.EmpreinteCle(ancien.Retenu.CleServeur))
+		if strings.Contains(err.Error(), "a changé") {
+			meurt("%v. --oublier pour l'accepter", err)
 		}
-		if ancien.Retenu.Verrou != r.Verrou {
-			meurt("le verrou a changé (%s, avant %s) : refus. --oublier pour l'accepter",
-				client.EmpreinteVerrou(r.Verrou), client.EmpreinteVerrou(ancien.Retenu.Verrou))
-		}
-	}
-	reseau, err1 := netip.ParsePrefix(r.Reseau)
-	moi, err2 := netip.ParseAddr(r.Appareil.Adresse)
-	if err1 != nil || err2 != nil || !moi.Is4() || !reseau.Contains(moi) {
-		meurt("réponse du serveur incohérente : adresse %q dans %q", r.Appareil.Adresse, r.Reseau)
-	}
-	ret := client.Retenu{CleServeur: r.Serveur.ClePublique, Verrou: r.Verrou, Moi: moi, Reseau: reseau,
-		MaCle: base64.StdEncoding.EncodeToString(prive.PublicKey().Bytes())}
-	if dejaInscrit == nil && ancien.Retenu.Verrou == r.Verrou {
-		ret.VersionPolitique, ret.VersionRevocations, ret.Revoquees =
-			ancien.Retenu.VersionPolitique, ancien.Retenu.VersionRevocations, ancien.Retenu.Revoquees
-	}
-	if err := ecrireEtat(etat{Serveur: *serveur, ClePrivee: base64.StdEncoding.EncodeToString(brut), Inscription: r, Retenu: ret}); err != nil {
 		meurt("%v", err)
 	}
+	r, ret := e.Inscription, e.Retenu
 	fmt.Printf("inscrit : %s, %s\n", client.Propre(r.Appareil.Nom), r.Appareil.Adresse)
 	fmt.Printf("clé publique : %s  (empreinte %s)\n", ret.MaCle, client.EmpreinteCle(ret.MaCle))
 	if r.Verrou != "" {
@@ -250,18 +155,12 @@ func rejoindre(args []string) {
 	}
 }
 
-func lireReseau(e etat) (protocole.EtatReseau, error) {
-	var r protocole.EtatReseau
-	err := api(e.Serveur).Appel("GET", protocole.CheminReseau, e.Inscription.Jeton, nil, &r)
-	return r, err
-}
-
 func appareils() {
-	e, err := lireEtat()
+	e, err := stockage.Lire()
 	if err != nil {
 		meurt("pas inscrit")
 	}
-	r, err := lireReseau(e)
+	r, err := appareil.LireReseau(api(e.Serveur), e)
 	if err != nil {
 		meurt("%v", err)
 	}
@@ -305,9 +204,8 @@ func qui(a protocole.Appareil) string {
 	return client.Propre(a.Proprietaire)
 }
 
-// demon ouvre l'interface, attend une inscription, et tient le tunnel.
-// Toutes les deux secondes il relit son état local ; toutes les dix, il
-// redemande au serveur l'état du réseau.
+// demon ouvre l'interface, attend une inscription, et tient le tunnel
+// (voir appareil.Tenir).
 func demon() error {
 	journal := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	iface, err := tun.Ouvrir("sas0")
@@ -320,110 +218,7 @@ func demon() error {
 	}
 	ctx, arret := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer arret()
-
-	var (
-		moteur      *tunnel.Moteur
-		dernier     []byte
-		cle         []byte
-		courant     etat
-		demande     time.Time
-		derniersRef string
-	)
-	t := time.NewTicker(2 * time.Second)
-	defer t.Stop()
-	for {
-		b, err := os.ReadFile(fichierEtat())
-		switch {
-		case err == nil && !bytes.Equal(b, dernier):
-			var e etat
-			if err := json.Unmarshal(b, &e); err != nil {
-				journal.Error("état illisible", "erreur", err)
-				break
-			}
-			brut, err1 := b64.Decoder(e.ClePrivee)
-			k, err2 := noise.ClePrivee(brut)
-			if err1 != nil || err2 != nil {
-				journal.Error("clé privée illisible")
-				break
-			}
-			switch {
-			case moteur == nil:
-				moteur = tunnel.Nouveau(tunnel.Config{Prive: k, Tun: iface, Conn: conn, Journal: journal, Adresse: e.Retenu.Moi})
-				go func() {
-					if err := moteur.Lancer(ctx); err != nil {
-						journal.Error("tunnel arrêté", "erreur", err)
-						arret()
-					}
-				}()
-			case !bytes.Equal(brut, cle):
-				// Nouvelle inscription, nouvelle clé : les sessions de
-				// l'ancienne ne valent plus rien.
-				moteur.DefinirCle(k)
-			}
-			moteur.DefinirAdresse(e.Retenu.Moi)
-			cle, dernier, courant, demande = brut, b, e, time.Time{}
-			if err := iface.Configurer(netip.PrefixFrom(e.Retenu.Moi, e.Retenu.Reseau.Bits()), tunnel.MTU); err != nil {
-				journal.Error("interface", "erreur", err)
-			}
-		case errors.Is(err, os.ErrNotExist) && moteur != nil && dernier != nil:
-			moteur.DefinirPairs(nil)
-			dernier = nil
-		}
-
-		if dernier != nil && time.Since(demande) >= 10*time.Second {
-			demande = time.Now()
-			refus, err := appliquerReseau(moteur, &courant)
-			switch {
-			case errors.Is(err, client.ErrDesinscrit):
-				journal.Warn("le serveur ne connaît plus cet appareil : tunnel coupé")
-				moteur.DefinirPairs(nil)
-			case err != nil:
-				journal.Error("état du réseau", "erreur", err)
-			case refus != derniersRef:
-				if refus != "" {
-					journal.Warn("refusé par ce client", "detail", refus)
-				}
-				derniersRef = refus
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-t.C:
-		}
-	}
-}
-
-// appliquerReseau : l'état du réseau, vérifié, devient la liste des pairs.
-// Ce que l'appareil apprend en chemin (versions signées, révocations) est
-// écrit sur disque : il ne l'oublie pas en redémarrant.
-func appliquerReseau(m *tunnel.Moteur, e *etat) (string, error) {
-	r, err := lireReseau(*e)
-	if err != nil {
-		return "", err
-	}
-	point, err := net.ResolveUDPAddr("udp", e.Inscription.Serveur.Point)
-	if err != nil {
-		return "", fmt.Errorf("point %s : %w", e.Inscription.Serveur.Point, err)
-	}
-	ret := e.Retenu
-	pairs, ecartes, err := client.Construire(r, &ret, point.AddrPort(), time.Now())
-	if err != nil {
-		return "", err
-	}
-	if ret.VersionPolitique != e.Retenu.VersionPolitique || ret.VersionRevocations != e.Retenu.VersionRevocations {
-		nouveau := *e
-		nouveau.Retenu = ret
-		if err := ecrireEtat(nouveau); err != nil {
-			return "", err
-		}
-	}
-	m.DefinirPairs(pairs)
-	var refus []string
-	for _, x := range ecartes {
-		refus = append(refus, fmt.Sprintf("%s (%s) : %s", x.Nom, x.Adresse, x.Raison))
-	}
-	return strings.Join(refus, " ; "), nil
+	return appareil.Tenir(ctx, appareil.Tenue{Stockage: stockage, Interface: iface, Conn: conn, Journal: journal, API: nouvelleAPI})
 }
 
 // --- le verrou, côté admin ------------------------------------------------------

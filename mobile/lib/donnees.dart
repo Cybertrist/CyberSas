@@ -1,6 +1,6 @@
-// Les données affichées par l'appli. Pour l'instant, un réseau d'exemple
-// qui reprend le labo (serveur, maison, téléphone, poste) : le moteur Go et
-// l'API du serveur viendront les remplacer, sans toucher aux écrans.
+// Les données affichées par l'appli : le vrai réseau, tenu par le moteur Go
+// (Reseau.reel), ou, pour la démo et les captures, un réseau d'exemple
+// qui reprend le labo (serveur, maison, téléphone, poste).
 import 'dart:async';
 import 'dart:math';
 
@@ -9,6 +9,7 @@ import 'package:flutter/painting.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'icones.dart';
+import 'moteur.dart';
 import 'theme.dart';
 
 enum TypeAppareil {
@@ -52,7 +53,14 @@ class Appareil {
     this.enLigne = false,
     this.moi = false,
     this.ports = const [],
+    this.signe = true,
+    this.raison = '',
   });
+
+  /// Son certificat est valide pour ce téléphone. Sinon, [raison] dit
+  /// pourquoi il est écarté (pas encore signé, expiré, révoqué).
+  final bool signe;
+  final String raison;
 
   final String nom;
   final String adresse;
@@ -85,7 +93,41 @@ class Appareil {
         enLigne: enLigne,
         moi: moi,
         ports: ports,
+        signe: signe,
+        raison: raison,
       );
+
+  /// Un appareil tel que le moteur le décrit (pont.Pair).
+  factory Appareil.duMoteur(Map<String, dynamic> j) {
+    final etiquette = j['etiquette'] as String? ?? '';
+    final systeme = j['systeme'] as String? ?? '';
+    final serveur = j['serveur'] == true;
+    final type = switch ((serveur, etiquette, systeme)) {
+      (true, _, _) => TypeAppareil.serveur,
+      (_, final e, _) when e.isNotEmpty => TypeAppareil.maison,
+      (_, _, 'android' || 'ios') => TypeAppareil.telephone,
+      _ => TypeAppareil.pc,
+    };
+    final email = j['proprietaire'] as String? ?? '';
+    final expire = DateTime.tryParse(j['expire'] as String? ?? '');
+    return Appareil(
+      nom: j['nom'] as String? ?? '?',
+      adresse: j['adresse'] as String? ?? '',
+      type: type,
+      // Les machines (serveur, maison) sont celles de l'admin.
+      proprietaire: serveur || etiquette.isNotEmpty ? 'admin' : prenom(email).toLowerCase(),
+      enLigne: j['en_ligne'] == true,
+      moi: j['moi'] == true,
+      signe: j['signe'] != false,
+      raison: j['raison'] as String? ?? '',
+      certificat: Certificat(
+        // Le verrou signe pour 90 jours par défaut.
+        debut: (expire ?? DateTime.now()).subtract(const Duration(days: 90)),
+        fin: expire ?? DateTime.now(),
+        empreinte: (j['empreinte'] as String? ?? '').split('-'),
+      ),
+    );
+  }
   String get fin => '.${adresse.split('.').last}';
 
   /// La couleur de l'appareil : cyan en ligne, gris hors ligne. Une seule
@@ -105,8 +147,8 @@ class Demande {
   String get proprietaire => nomPropre(compte.split('@').first.split('.').first);
 }
 
-class Invitation {
-  Invitation(this.serveur) : code = _code(), expire = DateTime.now().add(const Duration(minutes: 10));
+class CodeInvitation {
+  CodeInvitation(this.serveur) : code = _code(), expire = DateTime.now().add(const Duration(minutes: 10));
 
   final String serveur;
   final String code;
@@ -125,20 +167,47 @@ class Invitation {
 
 /// L'état de l'appli, partagé par tous les écrans.
 class Reseau extends ChangeNotifier {
-  Reseau({this.inscrit = false});
+  /// Le réseau d'exemple (démo, captures d'écran).
+  Reseau({this.inscrit = false}) : reel = false;
+
+  /// Le vrai réseau, tenu par le moteur. Vide jusqu'à [charger].
+  Reseau.reel()
+      : reel = true,
+        inscrit = false,
+        connecte = false {
+    appareils.clear();
+    demandes.clear();
+  }
+
+  /// Vrai : les données viennent du moteur (pont/ en Go), pas de l'exemple.
+  final bool reel;
 
   /// Faux tant que l'appareil n'a pas rejoint de réseau : l'appli s'ouvre
   /// alors sur l'écran de connexion.
   bool inscrit;
 
+  /// Le tunnel est ouvert (l'interrupteur).
   bool connecte = true;
+
+  /// Une session est établie avec le serveur. Le tunnel peut être ouvert
+  /// sans elle, le temps de la poignée de main ou si le serveur est
+  /// injoignable.
+  bool serveurJoint = true;
+
+  /// La dernière erreur du moteur, à afficher.
+  String erreur = '';
+
   DateTime debutConnexion = DateTime.now().subtract(const Duration(hours: 2, minutes: 14));
   String serveur = 'vpn.exemple.fr';
   String cleVerrou = '';
-  final plage = '10.77.0.0/24';
+  String plage = '10.77.0.0/24';
   final protocole = 'Noise IK';
-  final compte = 'Tristan';
-  final admin = true;
+  String compte = 'Tristan';
+  bool admin = true;
+
+  /// Cet appareil, d'après son inscription, avant que le moteur ait décrit
+  /// le réseau.
+  Appareil? _moiInscrit;
 
   /// L'appareil choisi dans la liste, quand la liste et le détail sont
   /// côte à côte (Fold déplié).
@@ -191,7 +260,7 @@ class Reseau extends ChangeNotifier {
     const Demande(nom: 'tab-tristan', compte: 'tristan@gmail.com', type: TypeAppareil.tablette, empreinte: ['Hc4W', 'pZ8n', 'Ke3s']),
   ];
 
-  Appareil get moi => appareils.firstWhere((a) => a.moi);
+  Appareil get moi => appareils.firstWhere((a) => a.moi, orElse: () => _moiInscrit ?? appareils.first);
   int get enLigne => appareils.where((a) => a.enLigne).length;
   int get horsLigne => appareils.length - enLigne;
 
@@ -205,8 +274,8 @@ class Reseau extends ChangeNotifier {
     return {for (final k in cles) k: m[k]!};
   }
 
-  Appareil appareil(String nom) => appareils.firstWhere((a) => a.nom == nom, orElse: () => appareils.first);
-  Appareil parAdresse(String adresse) => appareils.firstWhere((a) => a.adresse == adresse, orElse: () => appareils.first);
+  Appareil appareil(String nom) => appareils.firstWhere((a) => a.nom == nom, orElse: () => appareils.isEmpty ? moi : appareils.first);
+  Appareil parAdresse(String adresse) => appareils.firstWhere((a) => a.adresse == adresse, orElse: () => appareils.isEmpty ? moi : appareils.first);
 
   /// Vrai pendant qu'on allume ou coupe le tunnel : l'interrupteur ne
   /// répond plus tant que l'animation (et demain le moteur) n'a pas fini.
@@ -218,19 +287,109 @@ class Reseau extends ChangeNotifier {
 
   void basculer(bool v) {
     if (v == connecte || enTransition) return;
+    if (reel) {
+      _basculerReel(v);
+      return;
+    }
     connecte = v;
     if (v) debutConnexion = DateTime.now();
+    _attendreAnimation();
+    notifyListeners();
+  }
+
+  void _attendreAnimation() {
     enTransition = true;
+    _transition?.cancel();
     _transition = Timer(dureeTransition, () {
       enTransition = false;
       notifyListeners();
     });
+  }
+
+  Future<void> _basculerReel(bool v) async {
+    erreur = '';
+    if (v) {
+      // La première fois, Android demande d'autoriser le VPN.
+      if (!await Moteur.demarrer()) {
+        erreur = 'Autorisation VPN refusée';
+        notifyListeners();
+        return;
+      }
+      debutConnexion = DateTime.now();
+      serveurJoint = false;
+    } else {
+      await Moteur.arreter();
+    }
+    connecte = v;
+    _attendreAnimation();
+    notifyListeners();
+  }
+
+  // ─── Le vrai réseau ───
+
+  Timer? _suivi;
+
+  /// Lit l'inscription : sans elle, l'appli s'ouvre sur la connexion.
+  /// Puis suit l'état du moteur toutes les deux secondes.
+  Future<void> charger() async {
+    final i = await Moteur.inscription();
+    if (i == null) {
+      inscrit = false;
+      notifyListeners();
+      return;
+    }
+    _adopterInscription(i);
+    await _lireEtat();
+    _suivi?.cancel();
+    _suivi = Timer.periodic(const Duration(seconds: 2), (_) => _lireEtat());
+    notifyListeners();
+  }
+
+  void _adopterInscription(Map<String, dynamic> i) {
+    inscrit = true;
+    serveur = Uri.tryParse(i['serveur'] as String? ?? '')?.host ?? '';
+    plage = i['reseau'] as String? ?? plage;
+    compte = prenom(i['proprietaire'] as String? ?? '');
+    admin = i['groupe'] == 'admins';
+    cleVerrou = i['verrou'] as String? ?? '';
+    _moiInscrit = Appareil(
+      nom: i['nom'] as String? ?? '',
+      adresse: i['adresse'] as String? ?? '',
+      type: TypeAppareil.telephone,
+      proprietaire: compte.toLowerCase(),
+      moi: true,
+      enLigne: true,
+      signe: false,
+      certificat: Certificat(debut: DateTime.now(), fin: DateTime.now(), empreinte: (i['empreinte'] as String? ?? '').split('-')),
+    );
+  }
+
+  Future<void> _lireEtat() async {
+    final Map<String, dynamic> e;
+    try {
+      e = await Moteur.etat();
+    } on Exception {
+      return;
+    }
+    final enMarche = e['en_marche'] == true;
+    // Pendant qu'on change d'état, l'interrupteur a la main.
+    if (!enTransition) connecte = enMarche;
+    serveurJoint = e['connecte'] == true;
+    erreur = e['erreur'] as String? ?? '';
+    final pairs = (e['pairs'] as List? ?? []).cast<Map<String, dynamic>>();
+    if (pairs.isNotEmpty) {
+      appareils
+        ..clear()
+        ..addAll(pairs.map(Appareil.duMoteur));
+      if (!appareils.any((a) => a.nom == selection)) selection = appareils.first.nom;
+    }
     notifyListeners();
   }
 
   @override
   void dispose() {
     _transition?.cancel();
+    _suivi?.cancel();
     super.dispose();
   }
 
@@ -239,14 +398,31 @@ class Reseau extends ChangeNotifier {
     notifyListeners();
   }
 
-  void rejoindre({required String serveur, required String cle}) {
-    this.serveur = serveur;
-    cleVerrou = cle;
-    inscrit = true;
-    notifyListeners();
+  /// Rejoint le réseau de l'invitation. Rend l'erreur à afficher, ou null.
+  Future<String?> rejoindre(Invitation i, {String nom = ''}) async {
+    if (!reel) {
+      serveur = i.hote;
+      cleVerrou = i.verrou;
+      inscrit = true;
+      notifyListeners();
+      return null;
+    }
+    try {
+      await Moteur.rejoindre(i, nom: nom);
+    } on ErreurMoteur catch (e) {
+      return e.message;
+    }
+    await charger();
+    return null;
   }
 
-  void quitter() {
+  Future<void> quitter() async {
+    if (reel) {
+      _suivi?.cancel();
+      await Moteur.quitter();
+      appareils.clear();
+      connecte = false;
+    }
     inscrit = false;
     notifyListeners();
   }
@@ -280,7 +456,8 @@ class Reseau extends ChangeNotifier {
 
   /// L'admin renomme n'importe quel appareil, les autres seulement les
   /// leurs. Le nom n'est pas dans le certificat : pas besoin de resigner.
-  bool peutRenommer(Appareil a) => admin || a.proprietaire == compte.toLowerCase();
+  // Le vrai serveur n'a pas encore de quoi renommer : seulement dans la démo.
+  bool peutRenommer(Appareil a) => !reel && (admin || a.proprietaire == compte.toLowerCase());
 
   /// Renomme [a] en « [prefixe][suffixe] ». Rend l'erreur à afficher, ou
   /// null si c'est fait.
@@ -343,4 +520,13 @@ String duree(Duration d) {
 }
 
 /// La version affichée dans « À propos » (même valeur que pubspec.yaml).
-const versionAppli = '0.3.7';
+const versionAppli = '0.4.0';
+
+/// « tristan.joncour@gmail.com » → « Tristan » : de quoi nommer quelqu'un
+/// sans son nom complet.
+String prenom(String email) {
+  // Les chiffres de fin ne font pas partie du prénom : « tristan29 ».
+  final p = email.split('@').first.split(RegExp(r'[._+-]')).first.replaceAll(RegExp(r'[0-9]+$'), '');
+  if (p.isEmpty) return '';
+  return p[0].toUpperCase() + p.substring(1).toLowerCase();
+}

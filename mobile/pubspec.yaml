@@ -4,12 +4,13 @@ publish_to: 'none'
 
 # Incrémenter à chaque APK envoyé : Android refuse une mise à jour dont
 # le numéro n'augmente pas.
-version: 0.3.7+10
+version: 0.4.0+11
 
 environment:
   sdk: ^3.13.4
 
 dependencies:
+  crypto: ^3.0.7
   flutter:
     sdk: flutter
   # Les icônes au trait des maquettes, tracées depuis leur SVG.

@@ -175,8 +175,10 @@ class _CarteEtat extends StatelessWidget {
     final (etat, sous) = switch ((on, attente)) {
       (true, true) => ('Connexion…', 'ouverture du tunnel'),
       (false, true) => ('Coupure…', 'fermeture du tunnel'),
+      // Tunnel ouvert, mais pas encore de session avec le serveur.
+      (true, false) when !r.serveurJoint => ('Connexion…', r.erreur.isNotEmpty ? 'serveur injoignable' : 'recherche du serveur'),
       (true, false) => ('Connecté', 'depuis ${duree(DateTime.now().difference(r.debutConnexion))}'),
-      (false, false) => ('Déconnecté', 'tunnel coupé'),
+      (false, false) => ('Déconnecté', r.erreur.isNotEmpty ? r.erreur : 'tunnel coupé'),
     };
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
@@ -261,12 +263,16 @@ class _CarteAppareil extends StatelessWidget {
               const SizedBox(height: 5),
               Text(moi.adresse, style: mono(grand ? 26 : 20)),
             ]),
-            const Spacer(),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              const Etiquette('Cet appareil'),
-              const SizedBox(height: 5),
-              Text(moi.nom, style: texte(grand ? 15 : 14, graisse: 500)),
-            ]),
+            const SizedBox(width: 16),
+            // Un nom long se coupe au lieu de sortir de la carte.
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                const Etiquette('Cet appareil'),
+                const SizedBox(height: 5),
+                Text(moi.nom,
+                    style: texte(grand ? 15 : 14, graisse: 500), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right),
+              ]),
+            ),
           ]),
         ),
         Padding(
@@ -274,7 +280,12 @@ class _CarteAppareil extends StatelessWidget {
           child: Row(children: [
             Expanded(child: garantie(Ico.cadenas, Couleurs.cyan, 'Chiffré de bout en bout', 'Protocole ${r.protocole}')),
             const SizedBox(width: 10),
-            Expanded(child: garantie(Ico.bouclier, Couleurs.cyan, 'Verrou vérifié', "Signé par l'admin")),
+            // Pas encore signé : l'admin compare cette empreinte avant de signer.
+            Expanded(
+              child: moi.signe
+                  ? garantie(Ico.bouclier, Couleurs.cyan, 'Verrou vérifié', "Signé par l'admin")
+                  : garantie(Ico.empreinte, Couleurs.rouge, 'En attente de signature', moi.certificat.empreinte.join('-')),
+            ),
           ]),
         ),
       ]),

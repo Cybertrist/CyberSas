@@ -258,6 +258,8 @@ class _Ligne extends StatelessWidget {
                         overflow: TextOverflow.ellipsis),
                   ),
                   if (a.moi) ...[const SizedBox(width: 7), const Puce('Vous', couleur: Couleurs.texte, fond: false, monoPolice: false)],
+                  // Écarté par ce téléphone : pas (encore) signé, expiré ou révoqué.
+                  if (!a.signe) ...[const SizedBox(width: 7), const Puce('NON SIGNÉ', couleur: Couleurs.rouge, fond: false)],
                 ]),
                 const SizedBox(height: 3),
                 Text(a.adresse, style: mono(12.5, graisse: 400, couleur: Couleurs.etiquette)),

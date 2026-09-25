@@ -6,3 +6,6 @@ politique/politique.sig
 
 # Pages intermédiaires des figures : elles portent des chemins de la machine.
 docs/tools/html/
+
+# Le moteur compilé : scripts/moteur.sh le refait.
+mobile/android/app/libs/

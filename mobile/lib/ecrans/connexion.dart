@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -7,11 +9,13 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../composants.dart';
 import '../etat.dart';
 import '../icones.dart';
+import '../moteur.dart';
 import '../theme.dart';
 
-/// Rejoindre un réseau : l'adresse du serveur, la clé publique du verrou
-/// donnée par l'admin (elle épingle le verrou dès le départ), puis le
-/// compte Google.
+/// Rejoindre un réseau. L'admin envoie une invitation (sas.sh invitation) :
+/// un lien cybersas:// qui porte l'adresse du serveur, une clé
+/// d'inscription à usage unique et la clé publique du verrou. Ouvert sur
+/// le téléphone, il amène ici ; on peut aussi le coller.
 class EcranConnexion extends StatefulWidget {
   const EcranConnexion({super.key});
 
@@ -19,169 +23,229 @@ class EcranConnexion extends StatefulWidget {
   State<EcranConnexion> createState() => _EcranConnexionState();
 }
 
-/// La clé du verrou s'écrit comme côté Go (internal/b64) : base64 standard,
-/// canonique, 32 octets (Ed25519). Une clé mal recopiée est refusée ici,
-/// avant même de contacter le serveur.
-bool cleVerrouValide(String s) {
+/// L'empreinte d'une clé, comme le serveur et sas l'affichent : les 12
+/// premiers caractères de son SHA-256 en base64, en trois blocs.
+String empreinteCle(String cleBase64) {
   try {
-    final b = base64.decode(s);
-    return b.length == 32 && base64.encode(b) == s;
+    final e = base64.encode(sha256.convert(base64.decode(cleBase64)).bytes).substring(0, 12);
+    return '${e.substring(0, 4)}-${e.substring(4, 8)}-${e.substring(8, 12)}';
   } on FormatException {
-    return false;
+    return 'illisible';
   }
 }
 
 class _EcranConnexionState extends State<EcranConnexion> {
-  late final _serveur = TextEditingController(text: EtatReseau.of(context).serveur);
-  final _verrou = TextEditingController();
-  final _focusServeur = FocusNode();
-  final _focusVerrou = FocusNode();
+  Invitation? _invitation;
+  bool _enCours = false;
+  String? _erreur;
+  StreamSubscription<Invitation>? _liens;
+  final _nom = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _focusServeur.addListener(() => setState(() {}));
-    _focusVerrou.addListener(() => setState(() {}));
+    Moteur.nomAppareil().then((n) {
+      if (mounted && _nom.text.isEmpty) _nom.text = n;
+    });
+    Moteur.lienInitial().then((i) {
+      if (i != null && mounted) setState(() => _invitation = i);
+    });
+    _liens = Moteur.liens.stream.listen((i) => setState(() {
+          _invitation = i;
+          _erreur = null;
+        }));
   }
 
   @override
   void dispose() {
-    _serveur.dispose();
-    _verrou.dispose();
-    _focusServeur.dispose();
-    _focusVerrou.dispose();
+    _liens?.cancel();
+    _nom.dispose();
     super.dispose();
   }
 
   Future<void> _coller() async {
     final d = await Clipboard.getData(Clipboard.kTextPlain);
-    final t = d?.text?.trim() ?? '';
-    if (t.isNotEmpty) setState(() => _verrou.text = t);
+    final i = Invitation.lire(d?.text ?? '');
+    setState(() {
+      _invitation = i;
+      _erreur = i == null ? "Ce n'est pas une invitation CyberSas : copie le lien cybersas:// en entier." : null;
+    });
   }
 
-  void _continuer() {
-    final serveur = _serveur.text.trim();
-    final cle = _verrou.text.trim();
-    String? erreur;
-    if (serveur.isEmpty || serveur.contains(' ')) {
-      erreur = "Indiquez l'adresse du serveur.";
-    } else if (!cleVerrouValide(cle)) {
-      erreur = cle.isEmpty ? "Collez la clé du verrou donnée par l'admin." : "Cette clé du verrou n'est pas valide : recopiez-la en entier.";
-    }
-    if (erreur != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erreur)));
-      return;
-    }
-    // La connexion Google et l'inscription passeront par le moteur Go ;
-    // en attendant, on rejoint le réseau d'exemple.
-    EtatReseau.of(context).rejoindre(serveur: serveur, cle: cle);
-  }
-
-  Widget _champ({
-    required Ico ico,
-    required String libelle,
-    required TextEditingController ctrl,
-    required FocusNode focus,
-    String? indice,
-    Widget? fin,
-    TextInputType? clavier,
-  }) {
-    final actif = focus.hasFocus;
-    return Bordee(
-      bordure: actif ? Bords.cyan : Bords.plat,
-      fond: actif ? const Color(0xEB090F16) : const Color(0xCC0C1117),
-      rayon: 18,
-      halo: actif ? [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.45), blurRadius: 24, spreadRadius: -8)] : null,
-      onTap: focus.requestFocus,
-      padding: const EdgeInsets.fromLTRB(16, 10, 14, 10),
-      child: Row(children: [
-        Icone(ico, couleur: actif ? Couleurs.cyan : Couleurs.secondaire, taille: 20, lueur: actif),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(libelle, style: texte(12.5, couleur: Couleurs.secondaire)),
-            const SizedBox(height: 3),
-            TextField(
-              controller: ctrl,
-              focusNode: focus,
-              keyboardType: clavier,
-              autocorrect: false,
-              enableSuggestions: false,
-              style: texte(16, graisse: 500),
-              cursorColor: Couleurs.cyan,
-              cursorWidth: 1.5,
-              decoration: InputDecoration.collapsed(hintText: indice, hintStyle: texte(16, graisse: 500, couleur: Couleurs.tertiaire)),
-            ),
-          ]),
-        ),
-        ?fin,
-      ]),
-    );
+  Future<void> _rejoindre() async {
+    final i = _invitation;
+    if (i == null || _enCours) return;
+    setState(() {
+      _enCours = true;
+      _erreur = null;
+    });
+    final erreur = await EtatReseau.of(context).rejoindre(i, nom: _nom.text.trim());
+    if (!mounted) return;
+    setState(() {
+      _enCours = false;
+      _erreur = erreur;
+    });
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        resizeToAvoidBottomInset: true,
-        body: Fond(
-          centre: const Alignment(0, -0.56),
-          etendue: const Size(0.7, 0.34),
-          child: SafeArea(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 24, 22, 22),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Expanded(
-                      child: SansDefilement(
-                        alignement: Alignment.topCenter,
-                        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                          const _Logo(),
-                          const SizedBox(height: 20),
-                          const Center(child: Marque(taille: 38)),
-                          const SizedBox(height: 10),
-                          Text('Réseau privé, chiffré de bout en bout.',
-                              textAlign: TextAlign.center, style: texte(13.5, couleur: Couleurs.secondaire)),
-                          const SizedBox(height: 32),
-                          _champ(
-                            ico: Ico.serveurLigne,
-                            libelle: 'Adresse du serveur',
-                            ctrl: _serveur,
-                            focus: _focusServeur,
-                            indice: 'vpn.exemple.fr',
-                            clavier: TextInputType.url,
-                          ),
+  Widget build(BuildContext context) {
+    final i = _invitation;
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      body: Fond(
+        centre: const Alignment(0, -0.56),
+        etendue: const Size(0.7, 0.34),
+        child: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(22, 24, 22, 22),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Expanded(
+                    child: SansDefilement(
+                      alignement: Alignment.topCenter,
+                      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        const _Logo(),
+                        const SizedBox(height: 20),
+                        const Center(child: Marque(taille: 38)),
+                        const SizedBox(height: 10),
+                        Text('Relie tes appareils entre eux, chiffré de bout en bout.',
+                            textAlign: TextAlign.center, style: texte(13.5, couleur: Couleurs.secondaire)),
+                        const SizedBox(height: 30),
+                        if (i == null) const _Explication() else ...[
+                          _CarteInvitation(i: i),
                           const SizedBox(height: 12),
-                          _champ(
-                            ico: Ico.cle,
-                            libelle: 'Clé du verrou',
-                            ctrl: _verrou,
-                            focus: _focusVerrou,
-                            indice: "Collez la clé de l'admin",
-                            fin: TextButton(
-                              onPressed: _coller,
-                              style: TextButton.styleFrom(foregroundColor: Couleurs.cyan, minimumSize: const Size(48, 40)),
-                              child: Text('Coller', style: texte(13, graisse: 600, couleur: Couleurs.cyan)),
-                            ),
-                          ),
-                        ]),
-                      ),
+                          _ChampNom(ctrl: _nom),
+                        ],
+                        if (_erreur != null) ...[
+                          const SizedBox(height: 14),
+                          Text(_erreur!, textAlign: TextAlign.center, style: texte(13.5, couleur: Couleurs.rougeClair, hauteur: 1.4)),
+                        ],
+                      ]),
                     ),
-                    const SizedBox(height: 16),
-                    _BoutonGoogle(onTap: _continuer),
-                    const SizedBox(height: 14),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text("L'admin doit signer cet appareil avant l'accès au réseau.",
-                          textAlign: TextAlign.center, style: texte(12, couleur: Couleurs.tertiaire, hauteur: 1.4)),
+                  ),
+                  const SizedBox(height: 16),
+                  if (i == null)
+                    BoutonContour(libelle: "Coller l'invitation", ico: Ico.cle, hauteur: 54, onTap: _coller)
+                  else
+                    BoutonContour(
+                      libelle: _enCours ? 'Inscription…' : 'Rejoindre le réseau',
+                      ico: Ico.appareils,
+                      hauteur: 54,
+                      onTap: _enCours ? null : _rejoindre,
                     ),
-                  ]),
-                ),
+                  const SizedBox(height: 12),
+                  if (i == null)
+                    _BoutonGoogle(
+                      onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text("La connexion Google arrive bientôt. En attendant, demande une invitation à l'admin."),
+                      )),
+                    )
+                  else
+                    BoutonFantome(libelle: 'Annuler', onTap: _enCours ? null : () => setState(() => _invitation = null)),
+                ]),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Le nom de cet appareil sur le réseau. Le serveur y ajoute celui de son
+/// propriétaire : « fold8 » devient « fold8-tristan ».
+class _ChampNom extends StatelessWidget {
+  const _ChampNom({required this.ctrl});
+  final TextEditingController ctrl;
+
+  @override
+  Widget build(BuildContext context) => Carte(
+        padding: const EdgeInsets.fromLTRB(16, 10, 14, 10),
+        child: Row(children: [
+          const Icone(Ico.etiquette, taille: 20),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Nom de cet appareil', style: texte(12.5, couleur: Couleurs.secondaire)),
+              const SizedBox(height: 3),
+              TextField(
+                controller: ctrl,
+                maxLength: 30,
+                autocorrect: false,
+                style: texte(16, graisse: 500),
+                cursorColor: Couleurs.cyan,
+                decoration: InputDecoration.collapsed(hintText: 'fold8', hintStyle: texte(16, couleur: Couleurs.tertiaire))
+                    .copyWith(counterText: ''),
+              ),
+            ]),
+          ),
+        ]),
       );
+}
+
+/// Sans invitation : ce qu'il faut faire.
+class _Explication extends StatelessWidget {
+  const _Explication();
+
+  @override
+  Widget build(BuildContext context) => Carte(
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Il te faut une invitation', style: texte(16, graisse: 600)),
+          const SizedBox(height: 8),
+          Text(
+            "Demande-la à l'admin du réseau : c'est un lien cybersas://, valable dix minutes et une seule fois. "
+            "Ouvre-le sur ce téléphone, ou copie-le puis colle-le ici.",
+            style: texte(13.5, couleur: Couleurs.secondaire, hauteur: 1.45),
+          ),
+        ]),
+      );
+}
+
+/// L'invitation reçue : où elle mène, et le verrou qu'elle annonce.
+class _CarteInvitation extends StatelessWidget {
+  const _CarteInvitation({required this.i});
+  final Invitation i;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget ligne(Ico ico, String libelle, String valeur, {bool monoValeur = false}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          child: Row(children: [
+            Icone(ico, taille: 18),
+            const SizedBox(width: 12),
+            Text(libelle, style: texte(14, couleur: Couleurs.secondaire)),
+            const Spacer(),
+            Flexible(
+              child: Text(valeur,
+                  textAlign: TextAlign.right,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoValeur ? mono(13.5, graisse: 400) : texte(14, graisse: 600)),
+            ),
+          ]),
+        );
+    return Bordee(
+      bordure: Bords.reflet,
+      fond: const Color(0xED090F16),
+      halo: haloCarte(),
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Etiquette('Invitation reçue', couleur: Couleurs.cyan),
+        const SizedBox(height: 6),
+        ligne(Ico.serveurLigne, 'Serveur', i.hote),
+        ligne(Ico.cle, "Clé d'inscription", 'usage unique'),
+        ligne(Ico.bouclier, 'Verrou', i.verrou.isEmpty ? 'aucun' : empreinteCle(i.verrou), monoValeur: true),
+        if (i.autorite.isNotEmpty) ligne(Ico.info, 'Certificat', 'autorité du labo'),
+        const SizedBox(height: 6),
+        Text(
+          "Cet appareil crée sa clé ici, elle n'en sortira pas. L'admin devra ensuite le signer.",
+          style: texte(12.5, couleur: Couleurs.tertiaire, hauteur: 1.4),
+        ),
+      ]),
+    );
+  }
 }
 
 class _Logo extends StatelessWidget {

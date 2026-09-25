@@ -10,8 +10,12 @@ import 'ecrans/reglages.dart';
 import 'ecrans/verrou.dart';
 import 'etat.dart';
 import 'icones.dart';
+import 'moteur.dart';
 import 'securite.dart';
 import 'theme.dart';
+
+/// La démo (--dart-define=DEMO=true) : un réseau d'exemple, rien à relier.
+const modeDemo = bool.fromEnvironment('DEMO');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,10 +26,14 @@ Future<void> main() async {
     systemNavigationBarColor: Colors.transparent,
     systemNavigationBarIconBrightness: Brightness.light,
   ));
-  // Réseau d'exemple déjà rejoint, le temps que le moteur Go arrive :
-  // « Quitter le réseau » ramène à l'écran de connexion.
-  final reseau = Reseau(inscrit: true);
+  // La démo (--dart-define=DEMO=true) tourne sur un réseau d'exemple, déjà
+  // rejoint ; la vraie appli lit son inscription dans le moteur.
+  final reseau = modeDemo ? Reseau(inscrit: true) : Reseau.reel();
   await reseau.chargerReglages();
+  if (!modeDemo) {
+    Moteur.ecouter();
+    await reseau.charger();
+  }
   if (reseau.ecranMasque) await masquerEcran(true);
   runApp(CyberSas(reseau: reseau));
 }

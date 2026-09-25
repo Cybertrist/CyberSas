@@ -20,7 +20,7 @@ class EcranAjout extends StatefulWidget {
 }
 
 class _EcranAjoutState extends State<EcranAjout> {
-  late Invitation _invitation = Invitation(EtatReseau.of(context).serveur);
+  late CodeInvitation _invitation = CodeInvitation(EtatReseau.of(context).serveur);
   late final Timer _horloge;
 
   @override
@@ -40,7 +40,7 @@ class _EcranAjoutState extends State<EcranAjout> {
     return d.isNegative ? Duration.zero : d;
   }
 
-  void _renouveler() => setState(() => _invitation = Invitation(_invitation.serveur));
+  void _renouveler() => setState(() => _invitation = CodeInvitation(_invitation.serveur));
 
   Future<void> _partager() => SharePlus.instance.share(ShareParams(
         subject: 'Invitation CyberSas',
@@ -52,6 +52,9 @@ class _EcranAjoutState extends State<EcranAjout> {
 
   @override
   Widget build(BuildContext context) {
+    // Le vrai serveur ne sait pas encore créer d'invitation depuis l'appli :
+    // pas de faux code ici, mais le moyen d'en créer une vraie.
+    if (EtatReseau.of(context).reel) return const _AjoutReel();
     final reste = _reste;
     final expiree = reste == Duration.zero;
     final mm = reste.inMinutes.toString().padLeft(2, '0');
@@ -245,4 +248,59 @@ class _Pastille extends StatelessWidget {
       child: Text('$n', style: texte(12, graisse: 600, couleur: actif ? Couleurs.cyan : Couleurs.tertiaire)),
     );
   }
+}
+
+/// En attendant que l'appli crée les invitations : comment en faire une.
+class _AjoutReel extends StatelessWidget {
+  const _AjoutReel();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        body: Fond(
+          child: SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: ListView(padding: const EdgeInsets.fromLTRB(16, 6, 16, 20), children: [
+                  const Align(alignment: Alignment.centerLeft, child: BoutonRetour('Appareils')),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text('Ajouter un appareil', style: titre(28)),
+                  ),
+                  const SizedBox(height: 14),
+                  Carte(
+                    padding: const EdgeInsets.all(18),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text("L'invitation se crée sur le serveur", style: texte(16, graisse: 600)),
+                      const SizedBox(height: 8),
+                      Text(
+                        "Pour l'instant, c'est le serveur qui fabrique les invitations. Sur sa machine, lance :",
+                        style: texte(13.5, couleur: Couleurs.secondaire, hauteur: 1.45),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Couleurs.bloc,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Couleurs.bordure),
+                        ),
+                        child: Text('bash scripts/sas.sh invitation <email>', style: mono(13, graisse: 400, couleur: Couleurs.cyan)),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        "Envoie le lien cybersas:// à la personne. Il vaut dix minutes, une seule fois, et elle doit déjà "
+                        "faire partie de l'équipe. Une fois qu'elle l'a ouvert, signe son appareil après avoir comparé l'empreinte.",
+                        style: texte(13.5, couleur: Couleurs.secondaire, hauteur: 1.45),
+                      ),
+                    ]),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      );
 }

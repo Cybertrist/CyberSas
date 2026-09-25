@@ -1,3 +1,4 @@
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -17,10 +18,25 @@ val proprietesCle = Properties().apply {
 }
 val clePresente = proprietesCle.containsKey("storeFile")
 
+// La démo (--dart-define=DEMO=true) est une application à part : autre
+// identifiant, autre nom, pour qu'elle s'installe à côté de la vraie sans la
+// remplacer. Flutter passe les --dart-define à Gradle, encodés en base64 et
+// séparés par des virgules.
+val definitions = (project.findProperty("dart-defines") as String?)
+    ?.split(",")
+    ?.map { String(Base64.getDecoder().decode(it)) }
+    ?: emptyList()
+val demo = "DEMO=true" in definitions
+
 android {
     namespace = "fr.cybersas.cybersas"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    // Pour le nom de l'application, qui change avec la démo.
+    buildFeatures {
+        resValues = true
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -29,6 +45,10 @@ android {
 
     defaultConfig {
         applicationId = "fr.cybersas.cybersas"
+        if (demo) applicationIdSuffix = ".demo"
+        resValue("string", "app_name", if (demo) "CyberSas démo" else "CyberSas")
+        // La démo ne doit pas intercepter les vraies invitations.
+        manifestPlaceholders["schemaInvitation"] = if (demo) "cybersasdemo" else "cybersas"
         // Android 9 au moins : l'invite biométrique (local_auth) plante avant
         // sans thème AppCompat.
         minSdk = 28
@@ -64,4 +84,12 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// Le moteur du tunnel, écrit en Go (pont/ à la racine du dépôt), compilé par
+// gomobile pour arm64 (téléphones) et x86_64 (émulateur) :
+//   gomobile bind -target=android/arm64,android/amd64 -androidapi 28 \
+//     -javapkg=fr.cybersas -o mobile/android/app/libs/moteur.aar ./pont
+dependencies {
+    implementation(files("libs/moteur.aar"))
 }

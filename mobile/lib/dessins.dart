@@ -593,7 +593,9 @@ class _PeintreTopologie extends CustomPainter {
     // Au-dessus du serveur, le nom passe au-dessus du point : dessous, le
     // lien vers le centre le barrerait.
     final dessus = p.dy < c.dy - 1;
-    _texte(canvas, a.nom, a.fin, Offset(p.dx, dessus ? p.dy - 10 : p.dy + 10), TextAlign.center, lumiere, dessus: dessus);
+    // Sur la carte, un nom long se raccourcit : « sdk-gphone64-x8… ».
+    final nom = a.nom.length > 16 ? '${a.nom.substring(0, 15)}…' : a.nom;
+    _texte(canvas, nom, a.fin, Offset(p.dx, dessus ? p.dy - 10 : p.dy + 10), TextAlign.center, lumiere, dessus: dessus);
   }
 
   /// Les [n] appareils, répartis sur une ellipse autour du serveur. Aucun

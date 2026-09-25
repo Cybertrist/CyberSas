@@ -6,6 +6,7 @@
 #   sas.sh google <id>               le client OAuth de Google Cloud (le secret est demandé)
 #   sas.sh membre <email> <groupe>   donne l'accès à un compte Google (admins ou equipe)
 #   sas.sh retirer <email>           le lui retire, et coupe ses appareils
+#   sas.sh invitation <email>        un lien cybersas:// pour que son appareil rejoigne le réseau
 #   sas.sh demarrer                  construit et lance la pile
 #   sas.sh etat                      les appareils du VPN
 #   sas.sh arreter                   arrête tout, sans rien effacer
@@ -196,6 +197,27 @@ cmd_google () {
   # oauth2-proxy ne relit son identifiant qu'au démarrage.
   if en_route oauth2-proxy; then docker compose restart oauth2-proxy >/dev/null 2>&1 && ok "oauth2-proxy relancé"; fi
 }
+
+# Une invitation : le lien que l'appli ouvre pour rejoindre le réseau. Il
+# porte tout ce qu'il faut : l'adresse du serveur, une clé d'inscription à
+# usage unique (dix minutes), la clé publique du verrou, que l'appareil
+# retient dès le départ, et, dans le labo, l'autorité qui a signé le
+# certificat. La personne doit déjà être dans l'équipe.
+cmd_invitation () {
+  [ $# -ge 1 ] || meurt "usage : sas.sh invitation <adresse google> [durée, 10m par défaut]"
+  local mail="$1" duree="${2:-10m}" cle verrou="" lien
+  grep -qF -- "$mail " "$EQUIPE" 2>/dev/null || meurt "$mail n'est pas dans l'équipe : sas.sh membre $mail equipe"
+  cle="$(sasd cle --utilisateur "$mail" --duree "$duree" | tr -d '\r')"
+  [ -n "$cle" ] || meurt "pas de clé d'inscription"
+  [ -f "$VERROU/publique" ] && verrou="$(tr -d '\r\n' < "$VERROU/publique")"
+  lien="cybersas://rejoindre?serveur=$(url "https://vpn.$DOMAINE")&cle=$(url "$cle")&verrou=$(url "$verrou")"
+  [ "$TLS" = labo ] && lien+="&autorite=$(url "$(base64 -w0 < "$ETAT/ca/public/cybersas-ca.pem")")"
+  printf '%s\n' "$lien"
+  echo "valable $duree, une seule fois" >&2
+}
+
+# url : encode ce qui ne passe pas tel quel dans un lien (base64 surtout).
+url () { printf '%s' "$1" | sed 's/%/%25/g; s/+/%2B/g; s#/#%2F#g; s/=/%3D/g; s/:/%3A/g'; }
 
 cmd_membre () {
   [ $# -eq 2 ] || meurt "usage : sas.sh membre <adresse google> <admins|equipe>"
@@ -484,6 +506,7 @@ case "$commande" in
   init) cmd_init ;;
   google) charger_env; cmd_google "$@" ;;
   membre) charger_env; cmd_membre "$@" ;;
+  invitation) charger_env; cmd_invitation "$@" ;;
   retirer) charger_env; cmd_retirer "$@" ;;
   demarrer) cmd_demarrer ;;
   signer) cmd_signer "$@" ;;

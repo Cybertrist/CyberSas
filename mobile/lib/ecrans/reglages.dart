@@ -257,6 +257,9 @@ class _Securite extends StatelessWidget {
       ]);
 }
 
+/// Ranger la clé du verrou, depuis n'importe quel écran (les demandes).
+Future<void> rangerCleVerrou(BuildContext context) => _Securite(r: EtatReseau.of(context))._importerVerrou(context);
+
 class _Reseau extends StatelessWidget {
   const _Reseau({required this.r});
   final Reseau r;

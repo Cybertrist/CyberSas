@@ -6,6 +6,7 @@ import '../etat.dart';
 import '../icones.dart';
 import '../securite.dart';
 import '../theme.dart';
+import 'reglages.dart';
 
 /// Admin : les appareils qui attendent la signature du verrou. On compare
 /// l'empreinte de la clé avec celle affichée sur l'appareil, puis on signe
@@ -41,6 +42,28 @@ class EcranDemandes extends StatelessWidget {
                       ),
                     ]),
                   ),
+                  // Admin, mais sans la clé du verrou : on voit les demandes, on
+                  // ne peut pas les signer.
+                  if (r.reel && !r.cleVerrouPresente && r.demandes.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    Carte(
+                      padding: const EdgeInsets.all(16),
+                      fond: Couleurs.rouge.withValues(alpha: 0.06),
+                      bord: Couleurs.rouge.withValues(alpha: 0.35),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          const Icone(Ico.cadenas, couleur: Couleurs.rougeClair, taille: 18),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text("Ton téléphone n'a pas la clé du verrou", style: texte(15, graisse: 600))),
+                        ]),
+                        const SizedBox(height: 6),
+                        Text("Sans elle, tu vois les demandes mais tu ne peux pas les signer.",
+                            style: texte(13.5, couleur: Couleurs.secondaire, hauteur: 1.4)),
+                        const SizedBox(height: 12),
+                        BoutonContour(libelle: 'Ranger la clé', ico: Ico.cle, hauteur: 44, onTap: () => rangerCleVerrou(context)),
+                      ]),
+                    ),
+                  ],
                   for (final d in r.demandes) ...[
                     const SizedBox(height: 14),
                     _CarteDemande(d: d),
@@ -155,18 +178,24 @@ class _BoutonSignerState extends State<_BoutonSigner> {
   }
 
   @override
-  Widget build(BuildContext context) => Carte(
-        rayon: 14,
-        fond: Couleurs.vert.withValues(alpha: 0.12),
-        bord: Couleurs.vert.withValues(alpha: 0.5),
-        onTap: _signer,
-        child: SizedBox(
-          height: 42,
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Icone(Ico.empreinte, couleur: Couleurs.vert, taille: 18),
-            const SizedBox(width: 9),
-            Text('Signer', style: texte(15, graisse: 600, couleur: Couleurs.vert)),
-          ]),
-        ),
-      );
+  Widget build(BuildContext context) {
+    final r = EtatReseau.of(context);
+    // Sans la clé du verrou : grisé, avec un cadenas.
+    final sansCle = r.reel && !r.cleVerrouPresente;
+    final c = sansCle ? Couleurs.tertiaire : Couleurs.vert;
+    return Carte(
+      rayon: 14,
+      fond: c.withValues(alpha: sansCle ? 0.06 : 0.12),
+      bord: c.withValues(alpha: 0.5),
+      onTap: sansCle ? null : _signer,
+      child: SizedBox(
+        height: 42,
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icone(sansCle ? Ico.cadenas : Ico.empreinte, couleur: c, taille: 18),
+          const SizedBox(width: 9),
+          Text('Signer', style: texte(15, graisse: 600, couleur: c)),
+        ]),
+      ),
+    );
+  }
 }

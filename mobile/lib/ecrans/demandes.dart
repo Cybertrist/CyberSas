@@ -119,7 +119,11 @@ class _CarteDemande extends StatelessWidget {
               couleur: Couleurs.rougeClair,
               bord: Couleurs.rouge.withValues(alpha: 0.4),
               onTap: () async {
+                // Pas besoin de la clé du verrou pour refuser, mais du doigt,
+                // comme pour signer : un téléphone laissé ouvert ne vide pas
+                // la liste.
                 final messager = ScaffoldMessenger.of(context);
+                if (await confirmerIdentite('Refuser ${d.nom}') != Identite.confirmee) return;
                 final e = await r.traiter(d);
                 messager.showSnackBar(SnackBar(content: Text(e ?? '${d.nom} refusé')));
               },

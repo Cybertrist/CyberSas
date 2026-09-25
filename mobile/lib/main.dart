@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'dessins.dart';
+import 'composants.dart';
 import 'donnees.dart';
 import 'ecrans/accueil.dart';
 import 'ecrans/appareils.dart';
+import 'ecrans/connexion.dart';
 import 'ecrans/reglages.dart';
+import 'ecrans/verrou.dart';
 import 'etat.dart';
+import 'icones.dart';
+import 'securite.dart';
 import 'theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -18,7 +22,12 @@ void main() {
     systemNavigationBarColor: Colors.transparent,
     systemNavigationBarIconBrightness: Brightness.light,
   ));
-  runApp(CyberSas(reseau: Reseau()));
+  // Réseau d'exemple déjà rejoint, le temps que le moteur Go arrive :
+  // « Quitter le réseau » ramène à l'écran de connexion.
+  final reseau = Reseau(inscrit: true);
+  await reseau.chargerReglages();
+  if (reseau.ecranMasque) await masquerEcran(true);
+  runApp(CyberSas(reseau: reseau));
 }
 
 class CyberSas extends StatelessWidget {
@@ -32,17 +41,89 @@ class CyberSas extends StatelessWidget {
           title: 'CyberSas',
           debugShowCheckedModeBanner: false,
           theme: themeCyberSas(),
-          home: const Coquille(),
+          home: const _Racine(),
         ),
       );
 }
 
+/// Pas encore de réseau : l'écran de connexion. Sinon, l'appli, derrière
+/// l'écran de verrouillage si on l'a demandé.
+class _Racine extends StatefulWidget {
+  const _Racine();
+
+  @override
+  State<_Racine> createState() => _RacineState();
+}
+
+class _RacineState extends State<_Racine> with WidgetsBindingObserver {
+  /// Au lancement, l'appli est verrouillée si le réglage est actif.
+  late bool _verrouillee = EtatReseau.of(context).verrouAppli;
+  DateTime? _partie;
+
+  /// Revenir dans l'appli moins de 30 s après l'avoir quittée ne la
+  /// reverrouille pas.
+  static const _grace = Duration(seconds: 30);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  bool? _petitEcran;
+
+  /// Sur un petit écran (téléphone, écran extérieur du Fold), l'appli reste
+  /// debout : couchée, elle serait minuscule. Déplié, elle tourne librement.
+  /// On se règle à chaque changement d'écran (plier, déplier).
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final petit = MediaQuery.sizeOf(context).shortestSide < 600;
+    if (petit == _petitEcran) return;
+    _petitEcran = petit;
+    SystemChrome.setPreferredOrientations(
+      petit ? const [DeviceOrientation.portraitUp] : const <DeviceOrientation>[],
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState etat) {
+    if (etat == AppLifecycleState.hidden || etat == AppLifecycleState.paused) {
+      _partie ??= DateTime.now();
+    } else if (etat == AppLifecycleState.resumed) {
+      final partie = _partie;
+      _partie = null;
+      if (partie != null && EtatReseau.of(context).verrouAppli && DateTime.now().difference(partie) > _grace) {
+        setState(() => _verrouillee = true);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = EtatReseau.of(context);
+    final Widget ecran;
+    if (!r.inscrit) {
+      ecran = const EcranConnexion();
+    } else if (_verrouillee && r.verrouAppli) {
+      ecran = EcranVerrou(deverrouiller: () => setState(() => _verrouillee = false));
+    } else {
+      ecran = const Coquille();
+    }
+    return AnimatedSwitcher(duration: const Duration(milliseconds: 350), child: ecran);
+  }
+}
+
 /// Les trois onglets, et la façon de naviguer selon l'écran :
-/// - étroit (téléphone, écran extérieur « passeport » du Fold) : barre
-///   flottante en bas ;
-/// - déplié en portrait (3/4) : la même barre, centrée ;
-/// - déplié en paysage (4/3) : un rail à gauche, et tout l'écran pour le
-///   contenu.
+/// - compact (téléphone, écran extérieur du Fold) : barre flottante en bas ;
+/// - déplié en portrait (3/4) : une barre de 480 dp, centrée ;
+/// - déplié en paysage (4/3) : un rail vertical de 96 dp à gauche.
 class Coquille extends StatefulWidget {
   const Coquille({super.key});
 
@@ -53,130 +134,183 @@ class Coquille extends StatefulWidget {
 class _CoquilleState extends State<Coquille> {
   int _onglet = 0;
 
-  static const _onglets = [
-    (Icons.home_outlined, Icons.home_rounded, 'Accueil'),
-    (Icons.hub_outlined, Icons.hub_rounded, 'Appareils'),
-    (Icons.tune_rounded, Icons.tune_rounded, 'Réglages'),
+  static const _onglets = [(Ico.accueil, 'Accueil'), (Ico.appareils, 'Appareils'), (Ico.reglages, 'Réglages')];
+
+  // Où luit le fond, écran par écran (comme dans les maquettes).
+  static const _lueurs = [
+    (Alignment(0, -0.4), Size(0.8, 0.34)),
+    (Alignment(0, -0.52), Size(0.8, 0.24)),
+    (Alignment(0.4, -0.76), Size(0.7, 0.22)),
   ];
+
+  void _choisir(int i) => setState(() => _onglet = i);
 
   @override
   Widget build(BuildContext context) {
-    final pages = const [EcranAccueil(), EcranAppareils(), EcranReglages()];
+    final r = EtatReseau.of(context);
+    final format = formatDe(context);
+    final pages = [
+      const EcranAccueil(),
+      const EcranAppareils(),
+      const EcranReglages(),
+    ];
+    final contenu = IndexedStack(index: _onglet, children: pages);
+    final alerte = r.admin && r.demandes.isNotEmpty;
+    final (centre, etendue) = format == Format.paysage
+        ? (const Alignment(-0.32, -0.2), const Size(0.4, 0.4))
+        : _lueurs[_onglet];
+
     return Scaffold(
-      body: FondReseau(
-        child: LayoutBuilder(builder: (context, c) {
-          final paysage = c.maxWidth >= 700 && c.maxWidth > c.maxHeight;
-          final contenu = IndexedStack(index: _onglet, children: pages);
-          if (paysage) {
-            return SafeArea(
+      body: Fond(
+        centre: centre,
+        etendue: etendue,
+        child: switch (format) {
+          Format.paysage => SafeArea(
               child: Row(children: [
-                _Rail(onglet: _onglet, onglets: _onglets, choisir: (i) => setState(() => _onglet = i)),
+                _Rail(onglet: _onglet, onglets: _onglets, alerte: alerte, choisir: _choisir),
                 Expanded(child: contenu),
               ]),
-            );
-          }
-          return SafeArea(
-            bottom: false,
-            child: Column(children: [
-              Expanded(child: contenu),
-              Padding(
-                padding: EdgeInsets.fromLTRB(16, 4, 16, 10 + MediaQuery.paddingOf(context).bottom),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 480),
-                  child: _BarreBas(onglet: _onglet, onglets: _onglets, choisir: (i) => setState(() => _onglet = i)),
+            ),
+          Format.portrait => SafeArea(
+              child: Column(children: [
+                Expanded(child: contenu),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 14),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: _Barre(onglet: _onglet, onglets: _onglets, alerte: alerte, choisir: _choisir),
+                  ),
                 ),
-              ),
-            ]),
-          );
-        }),
+              ]),
+            ),
+          Format.compact => SafeArea(
+              child: Column(children: [
+                Expanded(child: contenu),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: _Barre(onglet: _onglet, onglets: _onglets, alerte: alerte, choisir: _choisir),
+                ),
+              ]),
+            ),
+        },
       ),
     );
   }
 }
 
-typedef _Onglet = (IconData, IconData, String);
+typedef _Onglet = (Ico, String);
 
-class _BarreBas extends StatelessWidget {
-  const _BarreBas({required this.onglet, required this.onglets, required this.choisir});
+/// La barre flottante : 66 dp, rayon 24, fond flouté, bordure #2A333D.
+class _Barre extends StatelessWidget {
+  const _Barre({required this.onglet, required this.onglets, required this.alerte, required this.choisir});
   final int onglet;
   final List<_Onglet> onglets;
+  final bool alerte;
   final void Function(int) choisir;
 
   @override
   Widget build(BuildContext context) => Container(
-        height: 68,
-        padding: const EdgeInsets.all(6),
+        height: 66,
         decoration: BoxDecoration(
-          color: Couleurs.surface.withValues(alpha: 0.92),
+          color: Couleurs.barre,
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Couleurs.bordure.withValues(alpha: 0.9)),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 24, offset: const Offset(0, 8))],
+          border: Border.all(color: Couleurs.bordure),
+          boxShadow: const [BoxShadow(color: Color(0x80000000), blurRadius: 30, offset: Offset(0, 10))],
         ),
         child: Row(children: [
           for (var i = 0; i < onglets.length; i++)
-            Expanded(child: _Bouton(o: onglets[i], actif: i == onglet, onTap: () => choisir(i))),
+            Expanded(
+              child: _Bouton(
+                o: onglets[i],
+                actif: i == onglet,
+                pastille: i == 1 && alerte,
+                onTap: () => choisir(i),
+              ),
+            ),
         ]),
       );
 }
 
+/// Le rail du Fold déplié en paysage.
 class _Rail extends StatelessWidget {
-  const _Rail({required this.onglet, required this.onglets, required this.choisir});
+  const _Rail({required this.onglet, required this.onglets, required this.alerte, required this.choisir});
   final int onglet;
   final List<_Onglet> onglets;
+  final bool alerte;
   final void Function(int) choisir;
 
   @override
   Widget build(BuildContext context) => Container(
         width: 96,
-        margin: const EdgeInsets.fromLTRB(14, 14, 0, 14),
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: Couleurs.surface.withValues(alpha: 0.9),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Couleurs.bordure.withValues(alpha: 0.9)),
-        ),
+        decoration: const BoxDecoration(border: Border(right: BorderSide(color: Couleurs.separateur))),
+        padding: const EdgeInsets.fromLTRB(12, 40, 12, 20),
         child: Column(children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.asset('assets/icon/icon.png', width: 46, height: 46),
-          ),
-          const SizedBox(height: 28),
           for (var i = 0; i < onglets.length; i++)
-            SizedBox(height: 76, child: _Bouton(o: onglets[i], actif: i == onglet, onTap: () => choisir(i))),
+            SizedBox(
+              height: 70,
+              child: _Bouton(o: onglets[i], actif: i == onglet, pastille: i == 1 && alerte, rail: true, onTap: () => choisir(i)),
+            ),
         ]),
       );
 }
 
+/// Un onglet : l'icône dans une pastille douce quand il est choisi, le
+/// libellé dessous (ou à côté sur la barre du Fold déplié). Un seul effet
+/// pour l'onglet actif, pas trois.
 class _Bouton extends StatelessWidget {
-  const _Bouton({required this.o, required this.actif, required this.onTap});
+  const _Bouton({required this.o, required this.actif, required this.pastille, required this.onTap, this.rail = false});
   final _Onglet o;
   final bool actif;
+  final bool pastille;
+  final bool rail;
   final VoidCallback onTap;
+
+  static const _duree = Duration(milliseconds: 220);
 
   @override
   Widget build(BuildContext context) {
-    final couleur = actif ? Couleurs.cyan : Couleurs.discret;
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onTap,
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(actif ? o.$2 : o.$1, size: 23, color: couleur, shadows: actif
-            ? [Shadow(color: Couleurs.cyan.withValues(alpha: 0.8), blurRadius: 12)]
-            : null),
-        const SizedBox(height: 3),
-        Text(o.$3, style: texte(12, graisse: actif ? 600 : 500, couleur: actif ? Couleurs.texte : Couleurs.discret)),
-        const SizedBox(height: 3),
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          width: actif ? 18 : 0,
-          height: 2.5,
-          decoration: BoxDecoration(
-            color: Couleurs.cyan,
-            borderRadius: BorderRadius.circular(2),
-            boxShadow: [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.8), blurRadius: 6)],
+    final icone = Stack(clipBehavior: Clip.none, children: [
+      Icone(o.$1, couleur: actif ? Couleurs.cyan : Couleurs.secondaire, taille: 22),
+      if (pastille)
+        Positioned(
+          top: -1,
+          right: -2,
+          child: Container(
+            width: 9,
+            height: 9,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Couleurs.rouge,
+              border: Border.all(color: const Color(0xFF080D13), width: 1.5),
+            ),
           ),
         ),
-      ]),
+    ]);
+    final libelle = Text(o.$2,
+        style: texte(12, graisse: actif ? 600 : 500, couleur: actif ? Couleurs.texte : Couleurs.secondaire));
+    final fond = BoxDecoration(
+      color: actif ? Couleurs.cyan.withValues(alpha: 0.12) : Couleurs.cyan.withValues(alpha: 0),
+      borderRadius: BorderRadius.circular(16),
+    );
+
+    final corps = Column(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [
+        AnimatedContainer(
+          duration: _duree,
+          curve: Curves.easeOutCubic,
+          width: rail ? 56 : 58,
+          height: 32,
+          alignment: Alignment.center,
+          decoration: fond,
+          child: icone,
+        ),
+        const SizedBox(height: 4),
+        libelle,
+      ]);
+    return Semantics(
+      button: true,
+      selected: actif,
+      label: pastille ? '${o.$2}, demandes en attente' : null,
+      child: GestureDetector(onTap: onTap, behavior: HitTestBehavior.opaque, child: corps),
     );
   }
 }

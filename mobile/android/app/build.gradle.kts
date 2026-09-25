@@ -29,7 +29,9 @@ android {
 
     defaultConfig {
         applicationId = "fr.cybersas.cybersas"
-        minSdk = flutter.minSdkVersion
+        // Android 9 au moins : l'invite biométrique (local_auth) plante avant
+        // sans thème AppCompat.
+        minSdk = 28
         targetSdk = flutter.targetSdkVersion
         // Tirés de « version: » dans pubspec.yaml.
         versionCode = flutter.versionCode

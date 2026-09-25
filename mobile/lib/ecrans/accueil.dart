@@ -1,260 +1,323 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../composants.dart';
 import '../dessins.dart';
 import '../donnees.dart';
 import '../etat.dart';
+import '../icones.dart';
 import '../theme.dart';
 
 /// L'accueil : le tunnel, l'interrupteur, et ce qui dit qu'on est protégé.
-/// Sur un écran étroit tout s'empile ; déplié en paysage, le tunnel passe
-/// à gauche ; déplié en portrait, les informations se rangent sur deux
-/// colonnes sous le tunnel.
-class EcranAccueil extends StatelessWidget {
+class EcranAccueil extends StatefulWidget {
   const EcranAccueil({super.key});
+
+  @override
+  State<EcranAccueil> createState() => _EcranAccueilState();
+}
+
+class _EcranAccueilState extends State<EcranAccueil> {
+  // « depuis 2 h 14 » avance avec l'horloge.
+  late final Timer _minute = Timer.periodic(const Duration(seconds: 20), (_) => setState(() {}));
+
+  @override
+  void dispose() {
+    _minute.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final r = EtatReseau.of(context);
-    return LayoutBuilder(builder: (context, c) {
-      final ecran = MediaQuery.sizeOf(context);
-      // L'orientation se lit sur l'écran entier : à côté du rail, la place
-      // restante est presque carrée même en paysage.
-      final paysage = ecran.width >= 700 && ecran.width > ecran.height;
-      final grandPortrait = c.maxWidth >= 600 && !paysage;
-      final entete = _Entete(r: r, grand: c.maxWidth >= 600);
+    final format = formatDe(context);
+    final entete = _Entete(grand: format != Format.compact);
 
-      if (paysage) {
+    switch (format) {
+      case Format.paysage:
         return Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+          padding: const EdgeInsets.fromLTRB(28, 16, 28, 24),
           child: Column(children: [
             entete,
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
             Expanded(
               child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Expanded(child: _ZoneTunnel(r: r)),
-                const SizedBox(width: 24),
-                Expanded(
-                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    _CarteEtat(r: r, grand: true),
-                    const SizedBox(height: 14),
-                    _CarteInfos(r: r),
-                    const SizedBox(height: 14),
-                    _CarteSecurite(r: r),
-                  ]),
+                Expanded(child: _Scene(r: r, largeurCarte: 520)),
+                const SizedBox(width: 30),
+                SizedBox(
+                  width: 440,
+                  child: SansDefilement(
+                    alignement: Alignment.center,
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      _CarteAppareil(r: r, grand: true),
+                      const SizedBox(height: 16),
+                      _Infos(r: r, complet: true),
+                    ]),
+                  ),
                 ),
               ]),
             ),
           ]),
         );
-      }
-
-      return Padding(
-        padding: EdgeInsets.fromLTRB(20, 12, 20, grandPortrait ? 16 : 8),
-        child: Column(children: [
-          entete,
-          const SizedBox(height: 8),
-          Expanded(child: _ZoneTunnel(r: r)),
-          const SizedBox(height: 12),
-          _CarteEtat(r: r, grand: grandPortrait),
-          const SizedBox(height: 12),
-          if (grandPortrait)
+      case Format.portrait:
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(28, 16, 28, 12),
+          child: Column(children: [
+            entete,
+            const SizedBox(height: 8),
+            Expanded(child: _Scene(r: r, largeurCarte: 560)),
+            const SizedBox(height: 16),
             IntrinsicHeight(
               child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Expanded(child: _CarteInfos(r: r)),
-                const SizedBox(width: 12),
-                Expanded(child: _CarteSecurite(r: r)),
+                Expanded(child: _CarteAppareil(r: r, grand: true)),
+                const SizedBox(width: 16),
+                Expanded(child: _Infos(r: r)),
               ]),
-            )
-          else
-            _CarteInfos(r: r, avecSecurite: true),
-        ]),
-      );
-    });
+            ),
+          ]),
+        );
+      case Format.compact:
+        return Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Column(children: [
+            entete,
+            Expanded(child: _Scene(r: r)),
+            const SizedBox(height: 12),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: _CarteAppareil(r: r)),
+            const SizedBox(height: 8),
+          ]),
+        );
+    }
   }
 }
 
 class _Entete extends StatelessWidget {
-  const _Entete({required this.r, required this.grand});
-  final Reseau r;
+  const _Entete({required this.grand});
   final bool grand;
 
   @override
-  Widget build(BuildContext context) => Row(children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Image.asset('assets/icon/icon.png', width: 30, height: 30),
+  Widget build(BuildContext context) => Padding(
+        padding: EdgeInsets.symmetric(horizontal: grand ? 0 : 22),
+        child: SizedBox(
+          height: grand ? 38 : 36,
+          child: Align(alignment: Alignment.centerLeft, child: Marque(taille: grand ? 30 : 24)),
         ),
-        const SizedBox(width: 10),
-        // Rétrécit plutôt que déborder, dans la colonne étroite du paysage.
-        Expanded(
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: FittedBox(fit: BoxFit.scaleDown, child: Marque(taille: grand ? 30 : 26)),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Container(
-          width: 38,
-          height: 38,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Couleurs.surface,
-            border: Border.all(color: Couleurs.bordure),
-          ),
-          child: Text(r.compte[0], style: texte(15, graisse: 600)),
-        ),
-      ]);
-}
-
-class _ZoneTunnel extends StatelessWidget {
-  const _ZoneTunnel({required this.r});
-  final Reseau r;
-
-  @override
-  Widget build(BuildContext context) => Viseur(
-        couleur: r.connecte ? Couleurs.cyan.withValues(alpha: 0.5) : Couleurs.eteint,
-        child: Stack(children: [
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 28, 8, 0),
-              child: Center(child: Tunnel(allume: r.connecte)),
-            ),
-          ),
-          Positioned(left: 14, top: 12, child: Text(r.plage, style: mono(11))),
-          Positioned(right: 14, top: 12, child: Text('E2E · NOISE', style: mono(11))),
-        ]),
       );
 }
 
-String _depuis(DateTime debut) {
-  final d = DateTime.now().difference(debut);
-  if (d.inHours > 0) return 'depuis ${d.inHours} h ${(d.inMinutes % 60).toString().padLeft(2, '0')}';
-  return 'depuis ${d.inMinutes} min';
+/// Le tunnel, ses coins de visée, et la carte d'état qui le chevauche.
+class _Scene extends StatelessWidget {
+  const _Scene({required this.r, this.largeurCarte});
+  final Reseau r;
+  final double? largeurCarte;
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = largeurCarte == null;
+    return LayoutBuilder(builder: (context, c) {
+      // Le tunnel garde ses proportions ; au-delà de 520 dp de haut, il
+      // cesse de grandir pour laisser respirer.
+      return Stack(children: [
+        Positioned(
+          left: compact ? 8 : 0,
+          right: compact ? 8 : 0,
+          top: 4,
+          bottom: compact ? 0 : 24,
+          child: Stack(fit: StackFit.expand, children: [
+            Tunnel(allume: r.connecte),
+            Positioned(top: 12, left: 14, child: _coin(true)),
+            Positioned(top: 12, right: 14, child: _coin(false)),
+            Positioned(
+              top: 30,
+              left: 18,
+              child: Text(r.plage, style: mono(11, graisse: 400, couleur: Couleurs.etiquette, espacement: 1.1)),
+            ),
+          ]),
+        ),
+        Positioned(
+          left: compact ? 16 : 0,
+          right: compact ? 16 : 0,
+          bottom: 0,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: largeurCarte ?? double.infinity),
+              child: _CarteEtat(r: r, grand: !compact),
+            ),
+          ),
+        ),
+      ]);
+    });
+  }
+
+  Widget _coin(bool gauche) => Container(
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(color: Couleurs.cyan.withValues(alpha: 0.5)),
+            left: gauche ? BorderSide(color: Couleurs.cyan.withValues(alpha: 0.5)) : BorderSide.none,
+            right: gauche ? BorderSide.none : BorderSide(color: Couleurs.cyan.withValues(alpha: 0.5)),
+          ),
+        ),
+      );
 }
 
+/// « TUNNEL SAS · Connecté depuis 2 h 14 », et l'interrupteur principal.
 class _CarteEtat extends StatelessWidget {
   const _CarteEtat({required this.r, required this.grand});
   final Reseau r;
   final bool grand;
 
   @override
-  Widget build(BuildContext context) => Carte(
-        lumineuse: r.connecte,
-        padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
+  Widget build(BuildContext context) {
+    final on = r.connecte;
+    final attente = r.enTransition;
+    final (etat, sous) = switch ((on, attente)) {
+      (true, true) => ('Connexion…', 'ouverture du tunnel'),
+      (false, true) => ('Coupure…', 'fermeture du tunnel'),
+      (true, false) => ('Connecté', 'depuis ${duree(DateTime.now().difference(r.debutConnexion))}'),
+      (false, false) => ('Déconnecté', 'tunnel coupé'),
+    };
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      child: Bordee(
+        key: ValueKey(on),
+        bordure: LinearGradient(
+          colors: on
+              ? [Couleurs.cyan.withValues(alpha: 0.6), Couleurs.bordure, Couleurs.bleu.withValues(alpha: 0.45)]
+              : const [Couleurs.bordure, Couleurs.bordure, Couleurs.bordure],
+          stops: const [0, 0.55, 1],
+        ),
+        rayon: grand ? 22 : 20,
+        halo: on ? haloCarte() : null,
+        padding: EdgeInsets.fromLTRB(grand ? 20 : 18, grand ? 11 : 9, grand ? 12 : 10, grand ? 11 : 9),
         child: Row(children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('TUNNEL SAS', style: etiquette()),
+              const Etiquette('Tunnel SAS'),
               const SizedBox(height: 4),
-              Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 8, children: [
-                // Jamais coupé en deux : le mot rétrécit s'il manque de place.
-                FittedBox(
-                  fit: BoxFit.scaleDown,
+              Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+                if (on && !attente)
+                  ShaderMask(
+                    shaderCallback: (b) => Couleurs.degrade.createShader(b),
+                    child: Text(etat, style: texte(21, graisse: 600, espacement: -0.42, couleur: Colors.white)),
+                  )
+                else
+                  Text(etat, style: texte(21, graisse: 600, espacement: -0.42, couleur: Couleurs.secondaire)),
+                const SizedBox(width: 9),
+                Flexible(
                   child: Text(
-                    r.connecte ? 'Connecté' : 'Déconnecté',
+                    sous,
+                    style: texte(12.5, couleur: on ? Couleurs.secondaire : Couleurs.tertiaire),
+                    maxLines: 1,
+                    overflow: TextOverflow.fade,
                     softWrap: false,
-                    style: syne(grand ? 32 : 27, couleur: r.connecte ? Couleurs.cyan : Couleurs.secondaire)
-                        .copyWith(shadows: r.connecte
-                            ? [Shadow(color: Couleurs.cyan.withValues(alpha: 0.5), blurRadius: 16)]
-                            : null),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 5),
-                  child: Text(r.connecte ? _depuis(r.debutConnexion) : 'aucun trafic ne passe',
-                      style: texte(13, couleur: Couleurs.secondaire)),
-                ),
               ]),
             ]),
           ),
-          // L'interrupteur grossi déborde de sa place : on la lui réserve.
-          const SizedBox(width: 14),
-          Transform.scale(
-            scale: 1.15,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: r.connecte
-                    ? [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.45), blurRadius: 18)]
-                    : null,
-              ),
-              child: Switch(value: r.connecte, onChanged: r.basculer),
-            ),
-          ),
+          Interrupteur(valeur: on, onChanged: attente ? null : r.basculer, largeur: grand ? 56 : 54, hauteur: grand ? 34 : 32),
         ]),
-      );
+      ),
+    );
+  }
 }
 
-class _CarteInfos extends StatelessWidget {
-  const _CarteInfos({required this.r, this.avecSecurite = false});
+/// L'adresse privée de l'appareil et ce qui le protège.
+class _CarteAppareil extends StatelessWidget {
+  const _CarteAppareil({required this.r, this.grand = false});
   final Reseau r;
-  final bool avecSecurite;
-
-  @override
-  Widget build(BuildContext context) => Carte(
-        padding: EdgeInsets.zero,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('ADRESSE PRIVÉE', style: etiquette()),
-                  const SizedBox(height: 4),
-                  Text(r.monAdresse, style: mono(22, couleur: Couleurs.texte, graisse: 600)),
-                ]),
-              ),
-              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text('APPAREIL', style: etiquette()),
-                const SizedBox(height: 6),
-                Text(r.monNom, style: mono(14, couleur: Couleurs.texte)),
-              ]),
-            ]),
-          ),
-          if (avecSecurite) ...[
-            Divider(height: 1, color: Couleurs.bordure.withValues(alpha: 0.7)),
-            _Garanties(r: r),
-          ],
-        ]),
-      );
-}
-
-class _CarteSecurite extends StatelessWidget {
-  const _CarteSecurite({required this.r});
-  final Reseau r;
-
-  @override
-  Widget build(BuildContext context) => Carte(padding: EdgeInsets.zero, child: _Garanties(r: r));
-}
-
-class _Garanties extends StatelessWidget {
-  const _Garanties({required this.r});
-  final Reseau r;
+  final bool grand;
 
   @override
   Widget build(BuildContext context) {
-    Widget item(IconData i, String titre, String sous) => Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(children: [
-              Icon(i, size: 18, color: r.connecte ? Couleurs.cyan : Couleurs.eteint),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(titre, style: texte(13.5, graisse: 600)),
-                  Text(sous, style: texte(11.5, couleur: Couleurs.secondaire)),
-                ]),
-              ),
+    final moi = r.moi;
+    Widget garantie(Ico ico, Color c, String titre, String sous) => Row(children: [
+          Icone(ico, couleur: c, taille: 19, lueur: true),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Text(titre, style: texte(13, graisse: 500, hauteur: 1.25)),
+              const SizedBox(height: 2),
+              Text(sous, style: texte(11.5, couleur: Couleurs.secondaire), maxLines: 1, overflow: TextOverflow.fade, softWrap: false),
             ]),
           ),
-        );
-    return IntrinsicHeight(
-      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        item(Icons.lock_outline_rounded, 'Chiffré de bout en bout', 'Illisible en route'),
-        VerticalDivider(width: 1, color: Couleurs.bordure.withValues(alpha: 0.7)),
-        item(Icons.verified_user_outlined, 'Verrou vérifié', 'Signé par l\'admin'),
+        ]);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xD10A1017),
+        borderRadius: BorderRadius.circular(grand ? 22 : 20),
+        border: Border.all(color: Couleurs.bordure),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          padding: EdgeInsets.fromLTRB(18, grand ? 16 : 13, 18, grand ? 14 : 11),
+          decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Couleurs.separateur))),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Etiquette('Adresse privée'),
+              const SizedBox(height: 5),
+              Text(moi.adresse, style: mono(grand ? 26 : 20)),
+            ]),
+            const Spacer(),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              const Etiquette('Cet appareil'),
+              const SizedBox(height: 5),
+              Text(moi.nom, style: texte(grand ? 15 : 14, graisse: 500)),
+            ]),
+          ]),
+        ),
+        Padding(
+          padding: EdgeInsets.fromLTRB(16, grand ? 14 : 11, 14, grand ? 15 : 12),
+          child: Row(children: [
+            Expanded(child: garantie(Ico.cadenas, Couleurs.cyan, 'Chiffré de bout en bout', 'Protocole ${r.protocole}')),
+            const SizedBox(width: 10),
+            Expanded(child: garantie(Ico.bouclier, Couleurs.cyan, 'Verrou vérifié', "Signé par l'admin")),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Les réglages du réseau, en lecture seule.
+class _Infos extends StatelessWidget {
+  const _Infos({required this.r, this.complet = false});
+  final Reseau r;
+  final bool complet;
+
+  @override
+  Widget build(BuildContext context) {
+    final lignes = [
+      if (complet)
+        (Ico.activite, Couleurs.cyan, 'Connecté depuis', r.connecte ? duree(DateTime.now().difference(r.debutConnexion)) : '·'),
+      if (complet) (Ico.appareils, Couleurs.cyan, 'Appareils joignables', r.connecte ? '${r.enLigne} sur ${r.appareils.length}' : '0 sur ${r.appareils.length}'),
+      (Ico.globe, Couleurs.cyan, 'Réseau', r.plage),
+      (Ico.cadenas, Couleurs.cyan, 'Protocole', r.protocole),
+      (Ico.serveurLigne, Couleurs.cyan, 'Serveur', r.serveur),
+    ];
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xD10A1017),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Couleurs.bordure),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+        for (var i = 0; i < lignes.length; i++)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            decoration: BoxDecoration(
+              border: i < lignes.length - 1 ? const Border(bottom: BorderSide(color: Couleurs.separateur)) : null,
+            ),
+            child: Row(children: [
+              Icone(lignes[i].$1, couleur: lignes[i].$2, taille: 18, lueur: true),
+              const SizedBox(width: 12),
+              Expanded(child: Text(lignes[i].$3, style: texte(14.5, couleur: Couleurs.secondaire))),
+              Text(lignes[i].$4, style: mono(14.5)),
+            ]),
+          ),
       ]),
     );
   }

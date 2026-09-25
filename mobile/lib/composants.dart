@@ -1,67 +1,65 @@
 // Les pièces réutilisées par tous les écrans.
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import 'donnees.dart';
+import 'icones.dart';
 import 'theme.dart';
 
-/// « CyberSas », « Sas » en cyan, comme sur le logo.
+/// « CyberSas », « Sas » en cyan.
 class Marque extends StatelessWidget {
-  const Marque({super.key, this.taille = 26});
+  const Marque({super.key, this.taille = 24});
   final double taille;
 
   @override
-  Widget build(BuildContext context) => Text.rich(TextSpan(children: [
-        TextSpan(text: 'Cyber', style: syne(taille)),
-        TextSpan(
-          text: 'Sas',
-          style: syne(taille, couleur: Couleurs.cyan).copyWith(shadows: [
-            Shadow(color: Couleurs.cyan.withValues(alpha: 0.55), blurRadius: taille * 0.6),
-          ]),
-        ),
-      ]));
+  Widget build(BuildContext context) => Text.rich(
+        TextSpan(children: [
+          TextSpan(text: 'Cyber', style: syne(taille)),
+          TextSpan(text: 'Sas', style: syne(taille, couleur: Couleurs.cyan)),
+        ]),
+        maxLines: 1,
+        softWrap: false,
+      );
 }
 
-/// Une carte en verre sombre. [lumineuse] : bordure cyan et halo.
-class Carte extends StatelessWidget {
-  const Carte({
+/// Une boîte au fond sombre et à la bordure d'1 dp en dégradé
+/// (padding-box + border-box des maquettes).
+class Bordee extends StatelessWidget {
+  const Bordee({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(16),
-    this.lumineuse = false,
-    this.rouge = false,
+    required this.bordure,
+    this.fond = Couleurs.vitre,
+    this.rayon = 20,
+    this.padding = EdgeInsets.zero,
+    this.halo,
     this.onTap,
+    this.largeur = 1,
   });
   final Widget child;
+  final Gradient bordure;
+  final Color fond;
+  final double rayon;
   final EdgeInsetsGeometry padding;
-  final bool lumineuse;
-  final bool rouge;
+  final List<BoxShadow>? halo;
   final VoidCallback? onTap;
+  final double largeur;
 
   @override
   Widget build(BuildContext context) {
-    final accent = rouge ? Couleurs.rouge : Couleurs.cyan;
-    final bord = lumineuse || rouge ? accent.withValues(alpha: 0.45) : Couleurs.bordure.withValues(alpha: 0.8);
-    final decor = BoxDecoration(
-      borderRadius: BorderRadius.circular(18),
-      gradient: LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: rouge
-            ? [const Color(0xFF1C0E14), const Color(0xFF12090D)]
-            : [Couleurs.surfaceHaute.withValues(alpha: 0.85), Couleurs.surface.withValues(alpha: 0.85)],
-      ),
-      border: Border.all(color: bord),
-      boxShadow: lumineuse
-          ? [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.14), blurRadius: 24, spreadRadius: -2)]
-          : null,
-    );
-    return Material(
-      type: MaterialType.transparency,
-      child: Ink(
-        decoration: decor,
+    final r = BorderRadius.circular(rayon);
+    return Container(
+      decoration: BoxDecoration(borderRadius: r, gradient: bordure, boxShadow: halo),
+      padding: EdgeInsets.all(largeur),
+      child: Material(
+        color: fond,
+        borderRadius: BorderRadius.circular(rayon - largeur),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(18),
+          splashColor: Couleurs.cyan.withValues(alpha: 0.08),
+          highlightColor: Couleurs.cyan.withValues(alpha: 0.04),
           child: Padding(padding: padding, child: child),
         ),
       ),
@@ -69,303 +67,644 @@ class Carte extends StatelessWidget {
   }
 }
 
-/// Une pastille : « ADMIN », « :443 », « Vous »…
-class Pastille extends StatelessWidget {
-  const Pastille(this.texte, {super.key, this.couleur = Couleurs.cyan, this.pleine = false});
-  final String texte;
-  final Color couleur;
-  final bool pleine;
+/// Les bordures en dégradé des maquettes.
+abstract final class Bords {
+  static const cyan = LinearGradient(colors: [Couleurs.cyan, Couleurs.bleu]);
+  static const reflet = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0x8C31E7FD), Couleurs.bordure, Color(0x4D31E7FD)],
+    stops: [0, 0.45, 1],
+  );
+  static LinearGradient accent(Color c) => LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [c.withValues(alpha: 0.6), Couleurs.bordure, c.withValues(alpha: 0.25)],
+        stops: const [0, 0.5, 1],
+      );
+  static const plat = LinearGradient(colors: [Couleurs.bordure, Couleurs.bordure]);
+}
+
+/// Halo des cartes actives : 0 0 30px -14px rgba(49,231,253,.55).
+List<BoxShadow> haloCarte([Color c = Couleurs.cyan, double a = 0.55]) =>
+    [BoxShadow(color: c.withValues(alpha: a), blurRadius: 30, spreadRadius: -14)];
+
+/// Une carte simple : fond translucide, bordure #2A333D.
+class Carte extends StatelessWidget {
+  const Carte({super.key, required this.child, this.padding = EdgeInsets.zero, this.rayon = 18, this.onTap, this.fond = Couleurs.carte, this.bord = Couleurs.bordure});
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final double rayon;
+  final VoidCallback? onTap;
+  final Color fond;
+  final Color bord;
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: couleur.withValues(alpha: pleine ? 0.16 : 0.06),
-          borderRadius: BorderRadius.circular(7),
-          border: Border.all(color: couleur.withValues(alpha: 0.45)),
+  Widget build(BuildContext context) => Material(
+        color: fond,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(rayon), side: BorderSide(color: bord)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          splashColor: Couleurs.cyan.withValues(alpha: 0.08),
+          highlightColor: Couleurs.cyan.withValues(alpha: 0.04),
+          child: Padding(padding: padding, child: child),
         ),
-        child: Text(texte, style: mono(11, couleur: couleur, espacement: 0.8)),
       );
 }
 
-/// Un petit titre de section : « PROPRIÉTAIRE · ADMIN ».
-class TitreSection extends StatelessWidget {
-  const TitreSection(this.texte, {super.key, this.couleur = Couleurs.discret});
+/// Une étiquette mono en capitales.
+class Etiquette extends StatelessWidget {
+  const Etiquette(this.texte, {super.key, this.couleur = Couleurs.etiquette, this.taille = 11});
   final String texte;
   final Color couleur;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
-        child: Text(texte.toUpperCase(), style: etiquette(couleur: couleur)),
-      );
-}
-
-IconData iconeDe(TypeAppareil t) => switch (t) {
-      TypeAppareil.serveur => Icons.dns_outlined,
-      TypeAppareil.maison => Icons.home_outlined,
-      TypeAppareil.telephone => Icons.smartphone_outlined,
-      TypeAppareil.ordinateur => Icons.laptop_outlined,
-      TypeAppareil.tablette => Icons.tablet_android_outlined,
-      TypeAppareil.inconnu => Icons.close_rounded,
-    };
-
-String libelleDe(TypeAppareil t) => switch (t) {
-      TypeAppareil.serveur => 'SERVEUR',
-      TypeAppareil.maison => 'MACHINE',
-      TypeAppareil.telephone => 'TÉLÉPHONE',
-      TypeAppareil.ordinateur => 'PORTABLE',
-      TypeAppareil.tablette => 'TABLETTE',
-      TypeAppareil.inconnu => 'INCONNU',
-    };
-
-/// L'icône d'un appareil, avec son point d'état en bas à droite.
-class IconeAppareil extends StatelessWidget {
-  const IconeAppareil(this.type, {super.key, this.enLigne = true, this.refuse = false, this.taille = 40});
-  final TypeAppareil type;
-  final bool enLigne;
-  final bool refuse;
   final double taille;
 
   @override
-  Widget build(BuildContext context) {
-    final couleur = refuse ? Couleurs.rouge : (enLigne ? Couleurs.cyan : Couleurs.eteint);
-    return SizedBox(
-      width: taille + 4,
-      height: taille + 4,
-      child: Stack(children: [
-        Container(
-          width: taille,
-          height: taille,
-          decoration: BoxDecoration(
-            color: couleur.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(taille * 0.3),
-            border: Border.all(color: couleur.withValues(alpha: 0.35)),
-          ),
-          child: Icon(iconeDe(type), size: taille * 0.5, color: couleur),
+  Widget build(BuildContext context) =>
+      Text(texte.toUpperCase(), style: etiquette(couleur: couleur, taille: taille), maxLines: 1, softWrap: false, overflow: TextOverflow.fade);
+}
+
+/// Une puce : « ADMIN », « :443 », « EN ATTENTE »…
+class Puce extends StatelessWidget {
+  const Puce(this.libelle, {super.key, this.couleur = Couleurs.cyan, this.fond = true, this.monoPolice = true, this.bord});
+  final String libelle;
+  final Color couleur;
+  final bool fond;
+  final bool monoPolice;
+  final Color? bord;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: EdgeInsets.symmetric(horizontal: monoPolice ? 7 : 8, vertical: monoPolice ? 2.5 : 3),
+        decoration: BoxDecoration(
+          color: fond ? couleur.withValues(alpha: 0.06) : null,
+          borderRadius: BorderRadius.circular(monoPolice ? 7 : 8),
+          border: Border.all(color: bord ?? couleur.withValues(alpha: 0.38)),
         ),
-        if (!refuse)
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: Container(
-              width: 11,
-              height: 11,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: enLigne ? Couleurs.cyan : Couleurs.fond,
-                border: Border.all(color: enLigne ? Couleurs.fond : Couleurs.eteint, width: 2),
-                boxShadow: enLigne
-                    ? [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.7), blurRadius: 6)]
-                    : null,
-              ),
+        child: Text(
+          libelle,
+          style: monoPolice
+              ? mono(11, graisse: 400, couleur: couleur, espacement: 0.66)
+              : texte(11.5, graisse: 600, couleur: couleur),
+          maxLines: 1,
+          softWrap: false,
+        ),
+      );
+}
+
+/// « :80 » : un port ouvert.
+class PucePort extends StatelessWidget {
+  const PucePort(this.port, {super.key});
+  final int port;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: Couleurs.cyan.withValues(alpha: 0.32)),
+        ),
+        child: Text(':$port', style: mono(11.5, graisse: 400, couleur: Couleurs.cyan)),
+      );
+}
+
+/// Un avatar rond : « T ».
+class Avatar extends StatelessWidget {
+  const Avatar({super.key, required this.lettre, this.taille = 36, this.plein = false, this.onTap});
+  final String lettre;
+  final double taille;
+  final bool plein;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Text(lettre,
+        style: texte(taille * (plein ? 0.4 : 0.39), graisse: plein ? 700 : 600, couleur: plein ? Couleurs.fond : Couleurs.texte));
+    final Widget rond = plein
+        ? Container(
+            width: taille,
+            height: taille,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Couleurs.cyan, Couleurs.bleu]),
             ),
-          ),
-      ]),
+            child: t,
+          )
+        : Container(
+            width: taille,
+            height: taille,
+            padding: const EdgeInsets.all(1),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Couleurs.cyan, Couleurs.bordure], stops: [0, 0.6]),
+            ),
+            child: Container(
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF0A1219)),
+              child: t,
+            ),
+          );
+    if (onTap == null) return rond;
+    return GestureDetector(onTap: onTap, behavior: HitTestBehavior.opaque, child: rond);
+  }
+}
+
+/// La case d'icône d'un appareil : fond teinté à 8 % et bordure à 32 % en
+/// ligne, pointillés gris hors ligne, pointillés colorés en attente.
+enum EtatIcone { enLigne, horsLigne, attente }
+
+class CaseIcone extends StatelessWidget {
+  const CaseIcone(this.ico, {super.key, required this.couleur, this.etat = EtatIcone.enLigne, this.taille = 34, this.halo = false});
+  final Ico ico;
+  final Color couleur;
+  final EtatIcone etat;
+  final double taille;
+  final bool halo;
+
+  factory CaseIcone.de(Appareil a, {double taille = 34}) =>
+      CaseIcone(a.type.ico, couleur: a.couleur, etat: a.enLigne ? EtatIcone.enLigne : EtatIcone.horsLigne, taille: taille);
+
+  @override
+  Widget build(BuildContext context) {
+    final r = taille * 0.3;
+    final icone = Icone(
+      ico,
+      couleur: etat == EtatIcone.horsLigne ? Couleurs.tertiaire : couleur,
+      taille: taille * 0.54,
+      lueur: etat != EtatIcone.horsLigne,
+    );
+    if (etat == EtatIcone.enLigne) {
+      return Container(
+        width: taille,
+        height: taille,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: couleur.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(r),
+          border: Border.all(color: couleur.withValues(alpha: 0.32)),
+          boxShadow: halo ? [BoxShadow(color: couleur.withValues(alpha: 0.6), blurRadius: 14, spreadRadius: -4)] : null,
+        ),
+        child: icone,
+      );
+    }
+    final bord = etat == EtatIcone.attente ? couleur.withValues(alpha: 0.6) : Couleurs.pointilles;
+    return CustomPaint(
+      painter: Pointilles(bord, r),
+      child: Container(
+        width: taille,
+        height: taille,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: etat == EtatIcone.attente ? couleur.withValues(alpha: 0.08) : Couleurs.surface,
+          borderRadius: BorderRadius.circular(r),
+        ),
+        child: icone,
+      ),
     );
   }
 }
 
-/// L'empreinte d'une clé en trois blocs, faite pour être comparée à l'œil.
-class Empreinte extends StatelessWidget {
-  const Empreinte(this.blocs, {super.key});
-  final List<String> blocs;
-
-  @override
-  Widget build(BuildContext context) => Row(
-        children: [
-          for (var i = 0; i < blocs.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            Expanded(
-              child: Container(
-                height: 40,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Couleurs.cyan.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Couleurs.cyan.withValues(alpha: 0.35)),
-                ),
-                child: Text(blocs[i], style: mono(15, couleur: Couleurs.cyan, graisse: 600)),
-              ),
-            ),
-          ],
-        ],
-      );
-}
-
-/// Bouton principal au contour lumineux.
-class BoutonLumineux extends StatelessWidget {
-  const BoutonLumineux({super.key, required this.libelle, required this.icone, this.onPressed, this.plein = false});
-  final String libelle;
-  final IconData icone;
-  final VoidCallback? onPressed;
-  final bool plein;
-
-  @override
-  Widget build(BuildContext context) => DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.18), blurRadius: 22)],
-        ),
-        child: Material(
-          color: plein ? null : Couleurs.cyan.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(16),
-          child: Ink(
-            decoration: BoxDecoration(
-              gradient: plein ? Couleurs.degrade : null,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Couleurs.cyan.withValues(alpha: 0.6)),
-            ),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: onPressed,
-              child: SizedBox(
-                height: 54,
-                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(icone, size: 19, color: plein ? Couleurs.fond : Couleurs.cyan),
-                  const SizedBox(width: 10),
-                  Text(libelle,
-                      style: texte(16, graisse: 600, couleur: plein ? Couleurs.fond : Couleurs.texte)),
-                ]),
-              ),
-            ),
-          ),
-        ),
-      );
-}
-
-/// « < Appareils » : le retour, en pilule.
-class BoutonRetour extends StatelessWidget {
-  const BoutonRetour(this.libelle, {super.key});
-  final String libelle;
-
-  @override
-  Widget build(BuildContext context) => Align(
-        alignment: Alignment.centerLeft,
-        child: Material(
-          color: Couleurs.surface,
-          shape: StadiumBorder(side: BorderSide(color: Couleurs.bordure.withValues(alpha: 0.9))),
-          child: InkWell(
-            customBorder: const StadiumBorder(),
-            onTap: () => Navigator.of(context).maybePop(),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 10, 16, 10),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.chevron_left_rounded, size: 20, color: Couleurs.cyan),
-                Text(libelle, style: texte(15, graisse: 500)),
-              ]),
-            ),
-          ),
-        ),
-      );
-}
-
-/// Les coins d'un viseur, autour du QR ou du tunnel.
-class Viseur extends StatelessWidget {
-  const Viseur({super.key, required this.child, this.couleur = Couleurs.cyan});
-  final Widget child;
+/// Une bordure en pointillés, arrondie.
+class Pointilles extends CustomPainter {
+  Pointilles(this.couleur, this.rayon, {this.tiret = 3, this.espace = 3, this.largeur = 1});
   final Color couleur;
-
-  @override
-  Widget build(BuildContext context) => CustomPaint(
-        foregroundPainter: _Coins(couleur),
-        child: child,
-      );
-}
-
-class _Coins extends CustomPainter {
-  _Coins(this.c);
-  final Color c;
+  final double rayon;
+  final double tiret;
+  final double espace;
+  final double largeur;
 
   @override
   void paint(Canvas canvas, Size s) {
     final p = Paint()
-      ..color = c.withValues(alpha: 0.8)
-      ..strokeWidth = 2
+      ..color = couleur
       ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-    const l = 18.0;
-    for (final (o, dx, dy) in [
-      (Offset.zero, 1.0, 1.0),
-      (Offset(s.width, 0), -1.0, 1.0),
-      (Offset(0, s.height), 1.0, -1.0),
-      (Offset(s.width, s.height), -1.0, -1.0),
-    ]) {
-      canvas.drawPath(
-        Path()
-          ..moveTo(o.dx, o.dy + dy * l)
-          ..lineTo(o.dx, o.dy)
-          ..lineTo(o.dx + dx * l, o.dy),
-        p,
-      );
+      ..strokeWidth = largeur;
+    final chemin = Path()..addRRect(RRect.fromRectAndRadius((Offset.zero & s).deflate(largeur / 2), Radius.circular(rayon)));
+    for (final m in chemin.computeMetrics()) {
+      for (var d = 0.0; d < m.length; d += tiret + espace) {
+        canvas.drawPath(m.extractPath(d, d + tiret), p);
+      }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _Coins old) => old.c != c;
+  bool shouldRepaint(covariant Pointilles old) => old.couleur != couleur || old.rayon != rayon;
 }
 
-/// Une ligne de réglage : icône, titre, sous-titre, et à droite ce qu'on veut.
-class LigneReglage extends StatelessWidget {
-  const LigneReglage({
-    super.key,
-    required this.icone,
-    required this.titre,
-    this.sousTitre,
-    this.fin,
-    this.onTap,
-    this.couleur = Couleurs.texte,
-    this.separateur = true,
-  });
-  final IconData icone;
-  final String titre;
-  final String? sousTitre;
-  final Widget? fin;
-  final VoidCallback? onTap;
+/// L'empreinte d'une clé en trois blocs mono, faite pour être comparée à
+/// l'œil.
+class Empreinte extends StatelessWidget {
+  const Empreinte(this.blocs, {super.key, this.couleur = Couleurs.cyan, this.hauteur = 36, this.bord = Couleurs.bordure});
+  final List<String> blocs;
   final Color couleur;
-  final bool separateur;
+  final Color bord;
+  final double hauteur;
 
   @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 56),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            border: separateur
-                ? Border(bottom: BorderSide(color: Couleurs.bordure.withValues(alpha: 0.6)))
-                : null,
-          ),
-          child: Row(children: [
-            Icon(icone, size: 20, color: couleur == Couleurs.texte ? Couleurs.cyan : couleur),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(titre, style: texte(15.5, graisse: 500, couleur: couleur)),
-                if (sousTitre != null) Text(sousTitre!, style: mono(11.5)),
-              ]),
+  Widget build(BuildContext context) => Row(children: [
+        for (var i = 0; i < blocs.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(
+            child: Container(
+              height: hauteur,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Couleurs.bloc,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: bord),
+              ),
+              child: Text(blocs[i], style: mono(hauteur * 0.44, couleur: couleur)),
             ),
-            ?fin,
+          ),
+        ],
+      ]);
+}
+
+/// Bouton principal : fond sombre, bordure en dégradé cyan → bleu, halo.
+class BoutonContour extends StatelessWidget {
+  const BoutonContour({super.key, required this.libelle, this.ico, this.onTap, this.hauteur = 50, this.rayon = 18, this.taillePolice = 15.5});
+  final String libelle;
+  final Ico? ico;
+  final VoidCallback? onTap;
+  final double hauteur;
+  final double rayon;
+  final double taillePolice;
+
+  @override
+  Widget build(BuildContext context) => Bordee(
+        bordure: Bords.cyan,
+        fond: const Color(0xF20A121A),
+        rayon: rayon,
+        onTap: onTap,
+        halo: [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.7), blurRadius: 26, spreadRadius: -10)],
+        child: Container(
+          height: hauteur - 2,
+          decoration: BoxDecoration(
+            gradient: RadialGradient(radius: 2.4, colors: [Colors.transparent, Couleurs.cyan.withValues(alpha: 0.06)]),
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            if (ico != null) ...[Icone(ico!, taille: 18, lueur: true), const SizedBox(width: 10)],
+            Flexible(child: Text(libelle, style: texte(taillePolice, graisse: 600), maxLines: 1, overflow: TextOverflow.ellipsis)),
           ]),
         ),
       );
 }
 
-/// Un bloc de lignes de réglage, dans une carte.
-class GroupeReglages extends StatelessWidget {
-  const GroupeReglages({super.key, required this.titre, required this.lignes});
+/// Bouton fantôme : bordure fine colorée.
+class BoutonFantome extends StatelessWidget {
+  const BoutonFantome({super.key, required this.libelle, this.couleur = Couleurs.secondaire, this.bord = Couleurs.bordure, this.onTap, this.hauteur = 44});
+  final String libelle;
+  final Color couleur;
+  final Color bord;
+  final VoidCallback? onTap;
+  final double hauteur;
+
+  @override
+  Widget build(BuildContext context) => Carte(
+        rayon: 14,
+        bord: bord,
+        fond: const Color(0x990C1117),
+        onTap: onTap,
+        child: SizedBox(
+          height: hauteur - 2,
+          child: Center(child: Text(libelle, style: texte(15, graisse: 600, couleur: couleur))),
+        ),
+      );
+}
+
+/// « ‹ Appareils » : le retour, en pilule.
+class BoutonRetour extends StatelessWidget {
+  const BoutonRetour(this.libelle, {super.key, this.onTap});
+  final String libelle;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: Couleurs.carte,
+        shape: const StadiumBorder(side: BorderSide(color: Couleurs.bordure)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap ?? () => Navigator.of(context).maybePop(),
+          child: SizedBox(
+            height: 38,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(9, 0, 15, 0),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icone(Ico.retour, taille: 17, trait: 2),
+                const SizedBox(width: 6),
+                Text(libelle, style: texte(14)),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+/// L'interrupteur principal, 54 × 32 : dégradé cyan et halo quand il est
+/// activé ; piste #1A222B et bouton #7C8894 sinon.
+class Interrupteur extends StatelessWidget {
+  const Interrupteur({super.key, required this.valeur, required this.onChanged, this.largeur = 54, this.hauteur = 32, this.libelle = 'Tunnel'});
+  final String libelle;
+  final bool valeur;
+
+  /// Nul : l'interrupteur est bloqué (tunnel en train de changer d'état)
+  /// et s'estompe.
+  final ValueChanged<bool>? onChanged;
+  final double largeur;
+  final double hauteur;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = hauteur - 6;
+    final bloque = onChanged == null;
+    return Semantics(
+      toggled: valeur,
+      enabled: !bloque,
+      label: libelle,
+      child: GestureDetector(
+        onTap: bloque ? null : () => onChanged!(!valeur),
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 200),
+          opacity: bloque ? 0.45 : 1,
+          child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            width: largeur,
+            height: hauteur,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(hauteur / 2),
+              gradient: valeur ? Couleurs.degrade : const LinearGradient(colors: [Couleurs.separateur, Couleurs.separateur]),
+              border: Border.all(color: valeur ? Colors.transparent : Couleurs.bordure),
+              boxShadow: valeur ? [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.65), blurRadius: 18, spreadRadius: -2)] : const [],
+            ),
+            child: AnimatedAlign(
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              alignment: valeur ? Alignment.centerRight : Alignment.centerLeft,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 260),
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                width: d,
+                height: d,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: valeur ? Couleurs.texte : Couleurs.tertiaire,
+                  boxShadow: valeur ? [const BoxShadow(color: Color(0x80001E32), blurRadius: 5, offset: Offset(0, 1))] : null,
+                ),
+              ),
+            ),
+          ),
+        ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Une ligne de réglage : icône, libellé, valeur à droite.
+class LigneReglage extends StatelessWidget {
+  const LigneReglage({
+    super.key,
+    required this.ico,
+    required this.libelle,
+    this.couleurIco = Couleurs.cyan,
+    this.couleurTexte = Couleurs.texte,
+    this.valeur,
+    this.valeurMono = false,
+    this.fin,
+    this.onTap,
+    this.separateur = true,
+    this.dense = false,
+    this.sousTitre,
+  });
+  final Ico ico;
+  final String libelle;
+
+  /// Une ligne d'explication sous le libellé.
+  final String? sousTitre;
+  final Color couleurIco;
+  final Color couleurTexte;
+  final String? valeur;
+  final bool valeurMono;
+  final Widget? fin;
+  final VoidCallback? onTap;
+  final bool separateur;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: dense ? 10 : 12),
+          decoration: BoxDecoration(border: separateur ? const Border(bottom: BorderSide(color: Couleurs.separateur)) : null),
+          child: Row(children: [
+            Icone(ico, couleur: couleurIco, taille: 19, lueur: true),
+            const SizedBox(width: 13),
+            Expanded(
+              child: sousTitre == null
+                  ? Text(libelle, style: texte(15, couleur: couleurTexte), maxLines: 1, overflow: TextOverflow.ellipsis)
+                  : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(libelle, style: texte(15, couleur: couleurTexte), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 2),
+                      Text(sousTitre!, style: texte(12.5, couleur: Couleurs.secondaire, hauteur: 1.3)),
+                    ]),
+            ),
+            if (valeur != null) ...[
+              const SizedBox(width: 10),
+              Text(valeur!,
+                  style: valeurMono ? mono(13.5, graisse: 400, couleur: Couleurs.etiquette) : texte(13.5, couleur: Couleurs.etiquette)),
+            ],
+            if (fin != null) ...[const SizedBox(width: 8), fin!],
+          ]),
+        ),
+      );
+}
+
+/// Un bloc de lignes, sous son étiquette.
+class Groupe extends StatelessWidget {
+  const Groupe({super.key, required this.titre, required this.enfants});
   final String titre;
-  final List<Widget> lignes;
+  final List<Widget> enfants;
 
   @override
   Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TitreSection(titre),
-          Carte(padding: EdgeInsets.zero, child: Column(children: lignes)),
+          Padding(padding: const EdgeInsets.fromLTRB(6, 0, 6, 8), child: Etiquette(titre)),
+          Carte(child: Column(children: enfants)),
         ],
       );
 }
 
-/// Chevron discret en fin de ligne.
-const chevron = Icon(Icons.chevron_right_rounded, size: 20, color: Couleurs.discret);
+/// Le chevron « › » des lignes cliquables.
+class Chevron extends StatelessWidget {
+  const Chevron({super.key});
+  @override
+  Widget build(BuildContext context) => const Icone(Ico.chevron, couleur: Couleurs.tertiaire, taille: 16, trait: 2);
+}
+
+/// Une pastille ronde avec un nombre : « 2 ».
+class Compteur extends StatelessWidget {
+  const Compteur(this.n, {super.key, this.couleur = Couleurs.rouge});
+  final int n;
+  final Color couleur;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        constraints: const BoxConstraints(minWidth: 24),
+        height: 24,
+        padding: const EdgeInsets.symmetric(horizontal: 7),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: couleur,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [BoxShadow(color: couleur.withValues(alpha: 0.5), blurRadius: 10, spreadRadius: -2)],
+        ),
+        child: Text('$n', style: texte(12.5, graisse: 700, couleur: Colors.white)),
+      );
+}
+
+/// Les coins de visée d'un cadre.
+class Coins extends CustomPainter {
+  Coins({this.couleur = Couleurs.cyan, this.longueur = 18, this.largeur = 2, this.rayon = 18, this.haut = true, this.bas = true});
+  final Color couleur;
+  final double longueur;
+  final double largeur;
+  final double rayon;
+  final bool haut;
+  final bool bas;
+
+  @override
+  void paint(Canvas canvas, Size s) {
+    final p = Paint()
+      ..color = couleur
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = largeur;
+    final r = rayon.clamp(0.0, longueur);
+    void coin(Offset o, double dx, double dy) {
+      final chemin = Path()
+        ..moveTo(o.dx, o.dy + dy * longueur)
+        ..lineTo(o.dx, o.dy + dy * r)
+        ..arcToPoint(Offset(o.dx + dx * r, o.dy), radius: Radius.circular(r), clockwise: dx * dy > 0)
+        ..lineTo(o.dx + dx * longueur, o.dy);
+      canvas.drawPath(chemin, p);
+    }
+
+    final m = largeur / 2;
+    if (haut) {
+      coin(Offset(m, m), 1, 1);
+      coin(Offset(s.width - m, m), -1, 1);
+    }
+    if (bas) {
+      coin(Offset(m, s.height - m), 1, -1);
+      coin(Offset(s.width - m, s.height - m), -1, -1);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant Coins old) => false;
+}
+
+/// Tout doit tenir dans la hauteur visible : si le contenu déborde (petit
+/// écran, grande police), il est réduit au lieu de défiler.
+class SansDefilement extends StatelessWidget {
+  const SansDefilement({super.key, required this.child, this.alignement = Alignment.topCenter});
+  final Widget child;
+  final Alignment alignement;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, c) => FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: alignement,
+          child: SizedBox(width: c.maxWidth, child: child),
+        ),
+      );
+}
+
+/// Le fond des écrans : dégradé radial #07131C → #04060A et grille de
+/// 24 dp à 5 % sous un masque radial. [centre] et [etendue] placent la
+/// lueur, comme dans chaque maquette.
+class Fond extends StatelessWidget {
+  const Fond({super.key, required this.child, this.centre = const Alignment(0, -0.4), this.etendue = const Size(0.8, 0.34)});
+  final Widget child;
+  final Alignment centre;
+  final Size etendue;
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(painter: _PeintreFond(centre, etendue), child: child);
+}
+
+class _PeintreFond extends CustomPainter {
+  _PeintreFond(this.centre, this.etendue);
+  final Alignment centre;
+  final Size etendue;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = Offset.zero & size;
+    final c = centre.alongSize(size);
+    canvas.drawRect(r, Paint()..color = Couleurs.fond);
+
+    // La lueur, elliptique : on dessine un cercle dans un repère étiré.
+    void ellipse(double rx, double ry, List<Color> couleurs, List<double> arrets, [BlendMode? mode]) {
+      canvas.save();
+      canvas.translate(c.dx, c.dy);
+      canvas.scale(1, ry / rx);
+      canvas.drawCircle(
+          Offset.zero,
+          rx,
+          Paint()
+            ..shader = ui.Gradient.radial(Offset.zero, rx, couleurs, arrets)
+            ..blendMode = mode ?? BlendMode.srcOver);
+      canvas.restore();
+    }
+
+    ellipse(size.width * 1.2, size.height * 0.5, const [Couleurs.fondHalo, Couleurs.fond], const [0, 0.7]);
+
+    // La grille, dans un calque masqué par un dégradé radial.
+    final trait = Paint()
+      ..color = Couleurs.cyan.withValues(alpha: 0.05)
+      ..strokeWidth = 1;
+    canvas.saveLayer(r, Paint());
+    for (var x = 0.0; x < size.width; x += 24) {
+      canvas.drawLine(Offset(x + 0.5, 0), Offset(x + 0.5, size.height), trait);
+    }
+    for (var y = 0.0; y < size.height; y += 24) {
+      canvas.drawLine(Offset(0, y + 0.5), Offset(size.width, y + 0.5), trait);
+    }
+    ellipse(size.width * etendue.width, size.height * etendue.height, const [Colors.black, Colors.transparent], const [0, 1], BlendMode.dstIn);
+    // Hors de l'ellipse, le masque doit aussi effacer la grille.
+    canvas.save();
+    final trou = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect(r)
+      ..addOval(Rect.fromCenter(center: c, width: size.width * etendue.width * 2, height: size.height * etendue.height * 2));
+    canvas.drawPath(trou, Paint()..blendMode = BlendMode.clear);
+    canvas.restore();
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _PeintreFond old) => old.centre != centre || old.etendue != etendue;
+}
+
+/// Les trois mises en page :
+/// - compact : téléphone, écran extérieur du Fold ;
+/// - portrait : Fold déplié tenu en 3/4 ;
+/// - paysage : Fold déplié tenu en 4/3.
+/// Le Fold 8 déplié fait environ 830 × 750 dp : on bascule dès 600 dp de
+/// large, sans attendre la classe « expanded » (840 dp).
+enum Format { compact, portrait, paysage }
+
+Format formatDe(BuildContext context) {
+  final s = MediaQuery.sizeOf(context);
+  if (s.width >= 700 && s.width > s.height) return Format.paysage;
+  if (s.width >= 600) return Format.portrait;
+  return Format.compact;
+}

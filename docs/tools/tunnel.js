@@ -131,7 +131,14 @@ function tunnel(px, py, pl, ph) {
     <feColorMatrix type="matrix" values=".016 .032 .006 0 .012  .038 .075 .014 0 .03  .052 .102 .019 0 .045  0 0 0 1 0"/>
   </filter>
   <clipPath id="tDessus"><path d="${T.dessus}"/></clipPath>
-  <clipPath id="tCadre"><rect x="${px}" y="${py}" width="${pl}" height="${ph}" rx="18"/></clipPath>
+  <!-- Pas de boîte : le dessin se pose sur le fond de la carte, et ses
+       bords (le sol, le ciel) s'effacent en douceur au lieu d'être coupés. -->
+  <radialGradient id="tFondu" cx="${px + pl / 2}" cy="${py + ph * 0.45}" r="${Math.max(pl, ph) * 0.62}" gradientUnits="userSpaceOnUse">
+    <stop offset="0.62" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+  </radialGradient>
+  <mask id="tCadre" maskUnits="userSpaceOnUse" x="${px - 200}" y="${py - 200}" width="${pl + 400}" height="${ph + 400}">
+    <rect x="${px - 200}" y="${py - 200}" width="${pl + 400}" height="${ph + 400}" fill="url(#tFondu)"/>
+  </mask>
   ${lin('tGMaison', 44, 200, [[0, 0x2DEBFF], [0.25, 0x18DDFF], [0.6, 0x0AA8FF], [1, 0x1FD2FF]])}
   ${lin('tGA1', 88, 200, [[0, 0x1CB9DB], [0.5, 0x0E8DB8], [1, 0x0A6C92]])}
   ${lin('tGA2', 118, 190, [[0, 0x127C9E], [1, 0x0A506E]])}
@@ -140,8 +147,7 @@ function tunnel(px, py, pl, ph) {
   ${rad('tLueurSol', 144, 162, 90, [[0, 0x31E7FD, 0.32], [1, 0x31E7FD, 0]])}
   ${rad('tNoyau', -1, -1.5, 12, [[0, 0x6FF1FF], [1, 0x14C8EE]])}
 </defs>
-<rect x="${px}" y="${py}" width="${pl}" height="${ph}" rx="18" fill="#04060A"/>
-<g clip-path="url(#tCadre)"><g transform="translate(${x},${y}) scale(${e})">
+<g mask="url(#tCadre)"><g transform="translate(${x},${y}) scale(${e})">
   <g transform="translate(1.6,-8) scale(1.1)">
     <g opacity="0.4">${dessin(false)}</g>
     ${dessin(true)}

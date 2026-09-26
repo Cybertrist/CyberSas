@@ -35,7 +35,14 @@
     <feColorMatrix type="matrix" values=".016 .032 .006 0 .012  .038 .075 .014 0 .03  .052 .102 .019 0 .045  0 0 0 1 0"/>
   </filter>
   <clipPath id="tDessus"><path d="M-60 -60 H350 V260 L167 159.5 H121 L-60 260 Z"/></clipPath>
-  <clipPath id="tCadre"><rect x="454" y="8" width="372" height="384" rx="18"/></clipPath>
+  <!-- Pas de boîte : le dessin se pose sur le fond de la carte, et ses
+       bords (le sol, le ciel) s'effacent en douceur au lieu d'être coupés. -->
+  <radialGradient id="tFondu" cx="640" cy="181.4" r="260.4" gradientUnits="userSpaceOnUse">
+    <stop offset="0.62" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+  </radialGradient>
+  <mask id="tCadre" maskUnits="userSpaceOnUse" x="230" y="-186" width="820" height="772">
+    <rect x="230" y="-186" width="820" height="772" fill="url(#tFondu)"/>
+  </mask>
   <linearGradient id="tGMaison" x1="0" y1="44" x2="0" y2="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2DEBFF" stop-opacity="1"/><stop offset="0.25" stop-color="#18DDFF" stop-opacity="1"/><stop offset="0.6" stop-color="#0AA8FF" stop-opacity="1"/><stop offset="1" stop-color="#1FD2FF" stop-opacity="1"/></linearGradient>
   <linearGradient id="tGA1" x1="0" y1="88" x2="0" y2="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1CB9DB" stop-opacity="1"/><stop offset="0.5" stop-color="#0E8DB8" stop-opacity="1"/><stop offset="1" stop-color="#0A6C92" stop-opacity="1"/></linearGradient>
   <linearGradient id="tGA2" x1="0" y1="118" x2="0" y2="190" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#127C9E" stop-opacity="1"/><stop offset="1" stop-color="#0A506E" stop-opacity="1"/></linearGradient>
@@ -44,8 +51,7 @@
   <radialGradient id="tLueurSol" cx="144" cy="162" r="90" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#31E7FD" stop-opacity="0.32"/><stop offset="1" stop-color="#31E7FD" stop-opacity="0"/></radialGradient>
   <radialGradient id="tNoyau" cx="-1" cy="-1.5" r="12" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6FF1FF" stop-opacity="1"/><stop offset="1" stop-color="#14C8EE" stop-opacity="1"/></radialGradient>
 </defs>
-<rect x="454" y="8" width="372" height="384" rx="18" fill="#04060A"/>
-<g clip-path="url(#tCadre)"><g transform="translate(458.2248520710059,8) scale(1.136094674556213)">
+<g mask="url(#tCadre)"><g transform="translate(463.905325443787,14) scale(1.1005917159763314)">
   <g transform="translate(1.6,-8) scale(1.1)">
     <g opacity="0.4"><defs>
 <radialGradient id="offCiel" cx="144" cy="110" r="150" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0E151C" stop-opacity="0.9"/><stop offset="0.6" stop-color="#0A1016" stop-opacity="0.5"/><stop offset="1" stop-color="#04060A" stop-opacity="0"/></radialGradient>
@@ -121,8 +127,7 @@
 </g></g>
   </g>
 </g></g>
-<path d="M 468 32 V 20 H 480" fill="none" stroke="#31E7FD" stroke-opacity="0.5"/><path d="M 812 32 V 20 H 800" fill="none" stroke="#31E7FD" stroke-opacity="0.5"/>
-<text x="472" y="48" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" font-weight="400" fill="#A3B1BD" text-anchor="start" letter-spacing="1.1" >10.77.0.0/24</text>
+
 <text x="80" y="150" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#31E7FD" text-anchor="start" letter-spacing="3" >LE TUNNEL</text>
 <text x="80" y="184" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="600" fill="#F1F5F9" text-anchor="start" >Noise IK, puis</text>
 <text x="80" y="214" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="600" fill="#F1F5F9" text-anchor="start" >ChaCha20-Poly1305</text>

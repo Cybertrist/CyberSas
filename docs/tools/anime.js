@@ -38,9 +38,9 @@ function enveloppe(exterieur, { ouverte = false } = {}) {
   const TN = require('./tunnel');
   const { C, A, E } = TN;
   // Le panneau : la zone du tunnel sur l'accueil d'un téléphone.
-  const pl = 372, ph = 384;
+  const pl = 420, ph = 372;
   const x = 640 - pl / 2;
-  const y = 8;
+  const y = 14;
   const coin = (cx, gauche) => `<path d="M ${cx + (gauche ? 0 : 12)} ${y + 24} V ${y + 12} H ${cx + (gauche ? 12 : 0)}" fill="none" stroke="${K.CYAN}" stroke-opacity="0.5"/>`;
   const fin = (a) => +a.toFixed(4);
   const plage = (de, a) => [[0, 0], [fin(de / C), 0], [fin(de / C + 0.004), 1], [fin(a / C), 1], [fin(a / C + 0.004), 0], [1, 0]];
@@ -49,8 +49,7 @@ function enveloppe(exterieur, { ouverte = false } = {}) {
   const eteint = E + 3.15;
   const corps = `
 ${TN.tunnel(x, y, pl, ph)}
-${coin(x + 14, true)}${coin(x + pl - 26, false)}
-${t(x + 18, y + 40, '10.77.0.0/24', { taille: 11, couleur: '#A3B1BD', police: MONO, espace: 1.1 })}
+
 ${t(80, 150, 'LE TUNNEL', { taille: 12, couleur: K.CYAN, police: MONO, espace: 3 })}
 ${t(80, 184, 'Noise IK, puis', { taille: 22, couleur: K.TITRE, poids: 600 })}
 ${t(80, 214, 'ChaCha20-Poly1305', { taille: 22, couleur: K.TITRE, poids: 600 })}

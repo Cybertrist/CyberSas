@@ -9,6 +9,6 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 mkdir -p mobile/android/app/libs
 go tool gomobile init
-go tool gomobile bind -target=android/arm64,android/amd64 -androidapi 28 -javapkg=fr.cybersas \
+go tool gomobile bind -target=android/arm64,android/amd64 -androidapi 30 -javapkg=fr.cybersas \
   -trimpath -ldflags="-s -w" -o mobile/android/app/libs/moteur.aar ./pont
 echo "moteur.aar prêt"

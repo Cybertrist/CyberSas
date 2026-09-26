@@ -2,6 +2,7 @@
 // (Reseau.reel), ou, pour la démo et les captures, un réseau d'exemple
 // qui reprend le labo (serveur, maison, téléphone, poste).
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -182,15 +183,37 @@ class Appareil {
   }
   String get fin => '.${adresse.split('.').last}';
 
+  /// L'empreinte de sa clé, en un seul texte : « v8Qe-Lm2T-x0Rw ».
+  String get empreinte => certificat.empreinte.join('-');
+
+  /// Ce qui le désigne sans ambiguïté, pour une confirmation ou l'invite
+  /// d'empreinte : le nom, c'est le serveur qui le choisit ; l'empreinte et
+  /// l'adresse, non.
+  String get resume => [
+        nomAffiche == nom ? nom : '$nomAffiche ($nom)',
+        'Empreinte $empreinte',
+        'Adresse ${adresse.isEmpty ? '?' : adresse}',
+      ].join('\n');
+
   /// La couleur de l'appareil : cyan en ligne, gris hors ligne. Une seule
   /// couleur pour tous, c'est le type qui les distingue.
   Color get couleur => enLigne ? Couleurs.cyan : Couleurs.tertiaire;
 }
 
 class Demande {
-  const Demande({required this.nom, required this.compte, required this.type, required this.empreinte, this.cle = ''});
+  const Demande({
+    required this.nom,
+    required this.compte,
+    required this.type,
+    required this.empreinte,
+    this.cle = '',
+    this.adresse = '',
+    this.groupe = '',
+    this.etiquette = '',
+    this.fiche = const {},
+  });
 
-  /// Sa clé publique : c'est elle que l'admin signe.
+  /// Sa clé publique.
   final String cle;
 
   final String nom;
@@ -198,9 +221,39 @@ class Demande {
   final TypeAppareil type;
   final List<String> empreinte;
 
+  /// Ce que le verrou inscrira dans le certificat, tel que le serveur le
+  /// propose : l'adresse sur le réseau, le groupe (« admins » donne les
+  /// droits d'admin) et, pour une machine, son étiquette.
+  final String adresse;
+  final String groupe;
+  final String etiquette;
+
+  /// La fiche complète, telle que le moteur l'a rendue (pont.Fiche). Elle
+  /// repart telle quelle au moteur pour la signature : il signe ce que
+  /// l'admin a vu, et refuse si le serveur l'a changée entre-temps.
+  final Map<String, dynamic> fiche;
+
+  /// Le verrou signe pour 90 jours.
+  static const dureeSignature = 90;
+
   /// « lea.martin@gmail.com » → « lea » : le prénom sert de suffixe au nom.
   String get proprietaire => nomPropre(compte.split('@').first.split('.').first);
+
+  /// À qui il appartient : une personne, ou une machine de l'admin.
+  String get titulaire => etiquette.isNotEmpty ? 'machine « $etiquette »' : (compte.isEmpty ? '?' : compte);
+
+  /// Le texte de l'invite d'empreinte : ce qui sera signé.
+  String get resume => [
+        nom,
+        'Empreinte ${empreinte.join('-')}',
+        'Adresse ${adresse.isEmpty ? '?' : adresse}, groupe ${groupe.isEmpty ? '?' : groupe}',
+        '$titulaire, $dureeSignature jours',
+      ].join('\n');
 }
+
+/// Rendu par une opération dont l'utilisateur a fermé l'invite d'empreinte :
+/// rien à afficher, on revient simplement.
+const operationAnnulee = '';
 
 class CodeInvitation {
   CodeInvitation(this.serveur) : code = _code(), expire = DateTime.now().add(const Duration(minutes: 10));
@@ -314,8 +367,22 @@ class Reseau extends ChangeNotifier {
   ];
 
   final demandes = <Demande>[
-    const Demande(nom: 'laptop-lea', compte: 'lea.martin@gmail.com', type: TypeAppareil.portable, empreinte: ['Qm7X', 'tR2k', '9vLp']),
-    const Demande(nom: 'tab-tristan', compte: 'tristan@gmail.com', type: TypeAppareil.tablette, empreinte: ['Hc4W', 'pZ8n', 'Ke3s']),
+    const Demande(
+      nom: 'laptop-lea',
+      compte: 'lea.martin@gmail.com',
+      type: TypeAppareil.portable,
+      empreinte: ['Qm7X', 'tR2k', '9vLp'],
+      adresse: '10.77.0.20',
+      groupe: 'equipe',
+    ),
+    const Demande(
+      nom: 'tab-tristan',
+      compte: 'tristan@gmail.com',
+      type: TypeAppareil.tablette,
+      empreinte: ['Hc4W', 'pZ8n', 'Ke3s'],
+      adresse: '10.77.0.21',
+      groupe: 'admins',
+    ),
   ];
 
   Appareil get moi => appareils.firstWhere((a) => a.moi, orElse: () => _moiInscrit ?? appareils.first);
@@ -367,11 +434,23 @@ class Reseau extends ChangeNotifier {
     });
   }
 
+  /// Vrai pendant qu'Android demande l'autorisation VPN : un second toucher
+  /// n'ouvre pas une seconde demande.
+  bool _demarrage = false;
+
   Future<void> _basculerReel(bool v) async {
+    if (_demarrage) return;
     erreur = '';
     if (v) {
       // La première fois, Android demande d'autoriser le VPN.
-      if (!await Moteur.demarrer()) {
+      _demarrage = true;
+      final bool autorise;
+      try {
+        autorise = await Moteur.demarrer();
+      } finally {
+        _demarrage = false;
+      }
+      if (!autorise) {
         erreur = 'Autorisation VPN refusée';
         notifyListeners();
         return;
@@ -523,16 +602,29 @@ class Reseau extends ChangeNotifier {
     return null;
   }
 
-  /// Signée : sur le vrai réseau, la clé du verrou sort du coffre (l'empreinte
-  /// vient d'être reconnue) et le moteur signe. Dans la démo, l'appareil
-  /// reçoit la première adresse libre et un certificat de 120 jours. Rend
-  /// l'erreur à afficher, ou null.
+  /// Une erreur du coffre, prête à rendre : [operationAnnulee] si
+  /// l'invite d'empreinte a été fermée ; si Android a effacé le coffre
+  /// (empreinte ajoutée au téléphone), ce téléphone n'a plus la clé.
+  String _erreurCoffre(ErreurMoteur e) {
+    if (e.annulee) return operationAnnulee;
+    if (e.coffrePerdu) {
+      cleVerrouPresente = false;
+      notifyListeners();
+    }
+    return e.message;
+  }
+
+  /// Signée : sur le vrai réseau, l'invite d'empreinte d'Android ouvre le
+  /// coffre pour cette seule signature, et le moteur signe la fiche que
+  /// l'admin a vue. Dans la démo, l'appareil reçoit l'adresse de sa demande
+  /// et un certificat de 90 jours. Rend l'erreur à afficher,
+  /// [operationAnnulee], ou null.
   Future<String?> signer(Demande d) async {
     if (reel) {
       try {
-        await Moteur.signer(d.cle);
+        await Moteur.signer(jsonEncode([d.fiche]), titre: 'Signer ${d.nom}', detail: d.resume);
       } on ErreurMoteur catch (e) {
-        return e.message;
+        return _erreurCoffre(e);
       }
       demandes.remove(d);
       notifyListeners();
@@ -541,17 +633,26 @@ class Reseau extends ChangeNotifier {
     }
     demandes.remove(d);
     final prises = appareils.map((a) => a.adresse).toSet();
-    var n = 2;
-    while (prises.contains('10.77.0.$n')) {
-      n++;
+    var adresse = d.adresse;
+    if (adresse.isEmpty || prises.contains(adresse)) {
+      var n = 2;
+      while (prises.contains('10.77.0.$n')) {
+        n++;
+      }
+      adresse = '10.77.0.$n';
     }
     final maintenant = DateTime.now();
     appareils.add(Appareil(
       nom: d.nom,
-      adresse: '10.77.0.$n',
+      adresse: adresse,
       type: d.type,
       proprietaire: d.proprietaire,
-      certificat: Certificat(debut: maintenant, fin: maintenant.add(const Duration(days: 120)), empreinte: d.empreinte),
+      groupe: d.groupe,
+      certificat: Certificat(
+        debut: maintenant,
+        fin: maintenant.add(const Duration(days: Demande.dureeSignature)),
+        empreinte: d.empreinte,
+      ),
     ));
     notifyListeners();
     return null;
@@ -581,13 +682,15 @@ class Reseau extends ChangeNotifier {
   bool peutRevoquer(Appareil a) => peutRetirer(a) && a.signe && (!reel || cleVerrouPresente);
 
   /// Révoque [a] : la liste signée par le verrou le bannit pour tous les
-  /// appareils, et le serveur l'oublie. Rend l'erreur, ou null.
+  /// appareils, et le serveur l'oublie. L'invite d'empreinte montre ce qui
+  /// est révoqué (nom, empreinte, adresse). Rend l'erreur,
+  /// [operationAnnulee], ou null.
   Future<String?> revoquerAppareil(Appareil a) async {
     if (reel) {
       try {
-        await Moteur.revoquer(a.cle);
+        await Moteur.revoquer(a.cle, titre: 'Révoquer ${a.nomAffiche}', detail: a.resume);
       } on ErreurMoteur catch (e) {
-        return e.message;
+        return _erreurCoffre(e);
       }
     }
     appareils.removeWhere((x) => x.adresse == a.adresse);
@@ -640,13 +743,14 @@ class Reseau extends ChangeNotifier {
   /// La clé du verrou est dans le coffre de ce téléphone : il peut signer.
   bool cleVerrouPresente = false;
 
-  /// Range la clé du verrou collée par l'admin (l'empreinte vient d'être
-  /// reconnue). Rend l'erreur à afficher, ou null.
+  /// Range la clé du verrou collée par l'admin : Android la vérifie, puis
+  /// demande l'empreinte qui autorise le rangement. Rend l'erreur à
+  /// afficher, [operationAnnulee], ou null.
   Future<String?> importerVerrou(String graine) async {
     try {
-      await Moteur.rangerVerrou(graine);
+      await Moteur.rangerVerrou(graine, titre: 'Ranger la clé du verrou');
     } on ErreurMoteur catch (e) {
-      return e.message;
+      return _erreurCoffre(e);
     }
     cleVerrouPresente = true;
     notifyListeners();
@@ -683,6 +787,12 @@ class Reseau extends ChangeNotifier {
                   : (f['systeme'] == 'android' ? TypeAppareil.telephone : TypeAppareil.pc),
               empreinte: (f['empreinte'] as String? ?? '').split('-'),
               cle: f['cle'] as String? ?? '',
+              adresse: f['adresse'] as String? ?? '',
+              groupe: f['groupe'] as String? ?? '',
+              etiquette: f['etiquette'] as String? ?? '',
+              // Gardée entière : c'est elle qui repart au moteur pour la
+              // signature, champ pour champ.
+              fiche: f,
             ),
       ]);
     notifyListeners();

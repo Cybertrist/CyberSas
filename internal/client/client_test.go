@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"math"
 	"net/netip"
 	"testing"
 	"time"
@@ -232,5 +233,17 @@ func TestRevocationEcritureNonCanonique(t *testing.T) {
 		if p.Publique == k {
 			t.Fatal("la maison révoquée est revenue sous une autre écriture de sa clé")
 		}
+	}
+}
+
+// Une liste retenue déjà au plafond ne repasse pas à zéro : la révocation
+// est refusée, pas signée avec la version 0.
+func TestAllongerRevocationsPlafond(t *testing.T) {
+	_, prive, _ := verrou.Generer()
+	var k [32]byte
+	k[0] = 1
+	_, _, err := AllongerRevocations(prive, math.MaxUint64, nil, nil, []string{base64.StdEncoding.EncodeToString(k[:])})
+	if err == nil {
+		t.Fatal("version au plafond acceptée")
 	}
 }

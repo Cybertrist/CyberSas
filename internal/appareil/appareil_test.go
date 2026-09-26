@@ -1,6 +1,7 @@
 package appareil
 
 import (
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -51,5 +52,30 @@ func TestEffacer(t *testing.T) {
 	}
 	if _, err := s.Lire(); !os.IsNotExist(err) {
 		t.Errorf("l'état est encore lisible : %v", err)
+	}
+}
+
+// Le réseau routé dans le tunnel : une plage privée, pas plus large qu'un
+// /16, et un domaine sous .internal. Un lien forgé ne détourne pas tout
+// l'Internet du téléphone.
+func TestReseauAcceptable(t *testing.T) {
+	for _, c := range []struct {
+		reseau, domaine string
+		ok              bool
+	}{
+		{"10.77.0.0/24", "sas.internal", true},
+		{"192.168.4.0/24", "", true},
+		{"100.64.0.0/16", "internal", true},
+		{"0.0.0.0/0", "sas.internal", false},
+		{"10.0.0.0/8", "sas.internal", false},
+		{"8.8.8.0/24", "sas.internal", false},
+		{"172.32.0.0/24", "sas.internal", false},
+		{"10.77.0.0/24", "com", false},
+		{"10.77.0.0/24", "banque.fr", false},
+	} {
+		err := ReseauAcceptable(netip.MustParsePrefix(c.reseau), c.domaine)
+		if (err == nil) != c.ok {
+			t.Errorf("%s %q : %v", c.reseau, c.domaine, err)
+		}
 	}
 }

@@ -111,21 +111,28 @@ func VerifierVerrou(dossier, graine string) (string, error) {
 	return verrou.Empreinte(prive.Public().(ed25519.PublicKey)), nil
 }
 
-// Signer signe, avec la clé du verrou, les appareils dont la clé publique
-// est dans cles (séparées par des virgules), et envoie les certificats au
-// serveur. Comme « sas verrou signer » : on ne signe que les clés
-// désignées, lues sur les appareils eux-mêmes, jamais tout ce que le
-// serveur présente. Rend le nombre d'appareils signés.
-func Signer(dossier, graine, cles string) (int, error) {
+// Signer signe, avec la clé du verrou, les appareils de fiches : un
+// tableau JSON de Fiche, exactement celles que l'écran des demandes a
+// montrées à l'admin (Appareils). On ne signe que ce qu'il a vu :
+//   - la clé, dont il a comparé l'empreinte avec celle de l'appareil ;
+//   - l'adresse, le propriétaire ou l'étiquette, et le groupe affichés.
+//
+// Le serveur est relu au moment de signer : si un seul de ces champs a
+// changé entre-temps, on refuse. Sinon un serveur piraté montrerait
+// « groupe equipe » et ferait signer « groupe admins », ou l'adresse d'un
+// autre appareil. Rend le nombre d'appareils signés.
+func Signer(dossier, graine, fiches string) (int, error) {
 	prive, err := lireVerrou(dossier, graine)
 	if err != nil {
 		return 0, err
 	}
-	voulues := map[string]bool{}
-	for _, k := range strings.Split(cles, ",") {
-		if k = strings.TrimSpace(k); k != "" {
-			voulues[k] = true
-		}
+	var vues []Fiche
+	if err := json.Unmarshal([]byte(fiches), &vues); err != nil || len(vues) == 0 {
+		return 0, errors.New("aucun appareil à signer")
+	}
+	e, err := appareil.Stockage{Dossier: dossier}.Lire()
+	if err != nil {
+		return 0, errors.New("pas inscrit")
 	}
 	var liste []protocole.Appareil
 	if err := appel(dossier, "GET", protocole.CheminAppareils, nil, &liste); err != nil {
@@ -133,35 +140,52 @@ func Signer(dossier, graine, cles string) (int, error) {
 	}
 	expire := time.Now().Add(dureeCertificat).Truncate(time.Second)
 	var sortie []protocole.Appareil
-	for _, a := range liste {
-		if !voulues[a.ClePublique] {
-			continue
+	for _, v := range vues {
+		i := slices.IndexFunc(liste, func(a protocole.Appareil) bool { return a.ClePublique == v.Cle })
+		if i < 0 {
+			return 0, fmt.Errorf("%s n'est plus sur le serveur", client.Propre(v.Nom))
 		}
-		delete(voulues, a.ClePublique)
+		a := liste[i]
+		if a.Adresse != v.Adresse || client.Propre(a.Proprietaire) != v.Proprietaire ||
+			client.Propre(a.Etiquette) != v.Etiquette || client.Propre(a.Groupe) != v.Groupe ||
+			a.Proprietaire != client.Propre(a.Proprietaire) || a.Etiquette != client.Propre(a.Etiquette) || a.Groupe != client.Propre(a.Groupe) {
+			return 0, fmt.Errorf("la fiche de %s a changé sur le serveur depuis l'affichage : rien n'est signé", client.Propre(v.Nom))
+		}
 		k, err1 := b64.Cle32(a.ClePublique)
 		adresse, err2 := netip.ParseAddr(a.Adresse)
 		if err1 != nil || err2 != nil || !adresse.Is4() {
-			return 0, fmt.Errorf("fiche illisible : %s", client.Propre(a.Nom))
+			return 0, fmt.Errorf("fiche illisible : %s", client.Propre(v.Nom))
+		}
+		if err := adresseSignable(adresse, a.ClePublique, e.Retenu.Reseau, liste); err != nil {
+			return 0, fmt.Errorf("%s : %w", client.Propre(v.Nom), err)
 		}
 		c := verrou.Certificat{Cle: k, Adresse: adresse, Etiquette: a.Etiquette, Proprietaire: a.Proprietaire,
 			Groupe: a.Groupe, Expire: expire}
 		sig, err := c.Signer(prive)
 		if err != nil {
-			return 0, fmt.Errorf("%s : %w", client.Propre(a.Nom), err)
+			return 0, fmt.Errorf("%s : %w", client.Propre(v.Nom), err)
 		}
 		a.Signature, a.SignatureExpire = base64.StdEncoding.EncodeToString(sig), expire
 		sortie = append(sortie, a)
-	}
-	if len(voulues) > 0 {
-		return 0, errors.New("un appareil à signer n'est plus sur le serveur")
-	}
-	if len(sortie) == 0 {
-		return 0, nil
 	}
 	if err := appel(dossier, "POST", protocole.CheminSignatures, sortie, nil); err != nil {
 		return 0, err
 	}
 	return len(sortie), nil
+}
+
+// adresseSignable : une adresse du réseau retenu, qui n'est ni celle du
+// serveur (la première) ni celle d'un autre appareil déjà signé.
+func adresseSignable(a netip.Addr, cle string, reseau netip.Prefix, liste []protocole.Appareil) error {
+	if !reseau.IsValid() || !reseau.Contains(a) || a == reseau.Masked().Addr() || a == reseau.Masked().Addr().Next() {
+		return fmt.Errorf("adresse %s hors du réseau", a)
+	}
+	for _, b := range liste {
+		if b.ClePublique != cle && b.Signature != "" && b.Adresse == a.String() {
+			return fmt.Errorf("adresse %s déjà signée pour %s", a, client.Propre(b.Nom))
+		}
+	}
+	return nil
 }
 
 // Retirer : un admin retire un appareil (une demande refusée).
@@ -217,9 +241,9 @@ func Inviter(dossier, utilisateur string, minutes int) (string, error) {
 
 // Revoquer ajoute les clés (séparées par des virgules) à la liste de
 // révocation, la signe avec la clé du verrou et l'envoie au serveur. On
-// part de la liste servie et de celle que cet appareil a déjà retenue :
-// la nouvelle les contient toutes deux, avec une version au-dessus.
-// Rend la nouvelle version.
+// part de la liste que cet appareil a retenue, et de celle que sert le
+// serveur si, et seulement si, elle est signée par le verrou
+// (client.AllongerRevocations). Rend la nouvelle version.
 func Revoquer(dossier, graine, cles string) (int, error) {
 	prive, err := lireVerrou(dossier, graine)
 	if err != nil {
@@ -237,39 +261,12 @@ func Revoquer(dossier, graine, cles string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	version := e.Retenu.VersionRevocations
-	liste := slices.Clone(e.Retenu.Revoquees)
-	if l := r.Revocations; l != nil {
-		version = max(version, l.Version)
-		for _, c := range l.Cles {
-			if !slices.Contains(liste, c) {
-				liste = append(liste, c)
-			}
-		}
+	l, _, err := client.AllongerRevocations(prive, e.Retenu.VersionRevocations, e.Retenu.Revoquees, r.Revocations, strings.Split(strings.ReplaceAll(cles, " ", ""), ","))
+	if err != nil {
+		return 0, err
 	}
-	nouvelles := 0
-	for _, c := range strings.Split(cles, ",") {
-		if c = strings.TrimSpace(c); c != "" && !slices.Contains(liste, c) {
-			liste = append(liste, c)
-			nouvelles++
-		}
-	}
-	if nouvelles == 0 {
-		return 0, errors.New("déjà révoqué")
-	}
-	var brutes [][32]byte
-	for _, c := range liste {
-		k, err := b64.Cle32(c)
-		if err != nil {
-			return 0, errors.New("clé illisible dans la liste de révocation")
-		}
-		brutes = append(brutes, k)
-	}
-	version++
-	l := protocole.ListeRevocations{Version: version, Cles: liste,
-		Signature: base64.StdEncoding.EncodeToString(verrou.SignerRevocations(prive, version, brutes))}
 	if err := appel(dossier, "POST", protocole.CheminRevocations, l, nil); err != nil {
 		return 0, err
 	}
-	return int(min(version, 1<<31)), nil
+	return int(min(l.Version, 1<<31)), nil
 }

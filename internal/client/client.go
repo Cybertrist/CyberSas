@@ -340,17 +340,8 @@ func adopterRevocations(l *protocole.ListeRevocations, cleVerrou []byte, ret *Re
 	if l == nil || l.Version <= ret.VersionRevocations {
 		return nil
 	}
-	var cles [][32]byte
-	for _, c := range l.Cles {
-		k, err := cle32(c)
-		if err != nil {
-			return []Ecarte{{"révocations", "", "liste malformée, ignorée"}}
-		}
-		cles = append(cles, k)
-	}
-	sig, _ := b64.Decoder(l.Signature)
-	if !verrou.VerifierRevocations(cleVerrou, l.Version, cles, sig) {
-		return []Ecarte{{"révocations", "", "liste mal signée, ignorée"}}
+	if _, ok := RevocationsSignees(l, cleVerrou); !ok {
+		return []Ecarte{{"révocations", "", "liste malformée ou mal signée, ignorée"}}
 	}
 	ret.VersionRevocations, ret.Revoquees = l.Version, slices.Clone(l.Cles)
 	return nil

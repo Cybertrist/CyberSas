@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ce qui ne quitte jamais le téléphone, ni par la sauvegarde Google ni
+     par le transfert vers un nouvel appareil : le dossier sas/ tient la clé
+     privée de l'appareil, son jeton et le coffre de la clé du verrou. Les
+     réglages (deux interrupteurs) peuvent suivre. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="sas/"/>
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="sas/"/>
+    </device-transfer>
+</data-extraction-rules>

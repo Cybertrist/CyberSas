@@ -162,6 +162,9 @@ func Rejoindre(s Stockage, api *client.API, serveur string, j client.Justificati
 	if err1 != nil || err2 != nil || !moi.Is4() || !reseau.Contains(moi) {
 		return Etat{}, fmt.Errorf("réponse du serveur incohérente : adresse %q dans %q", r.Appareil.Adresse, r.Reseau)
 	}
+	if err := ReseauAcceptable(reseau, r.Domaine); err != nil {
+		return Etat{}, err
+	}
 	ret := client.Retenu{CleServeur: r.Serveur.ClePublique, Verrou: r.Verrou, Moi: moi, Reseau: reseau,
 		MaCle: base64.StdEncoding.EncodeToString(prive.PublicKey().Bytes())}
 	if dejaInscrit == nil && ancien.Retenu.Verrou == r.Verrou {
@@ -341,4 +344,26 @@ func (t Tenue) appliquer(m *tunnel.Moteur, e *Etat) (string, protocole.EtatResea
 		refus = append(refus, fmt.Sprintf("%s (%s) : %s", x.Nom, x.Adresse, x.Raison))
 	}
 	return strings.Join(refus, " ; "), r, ecartes, nil
+}
+
+// ReseauAcceptable : le serveur choisit le réseau que le téléphone route
+// dans le tunnel et le domaine qu'il y cherche. Un lien d'invitation forgé
+// mènerait à un serveur qui répondrait 0.0.0.0/0 : tout l'Internet du
+// téléphone partirait chez lui. On n'accepte donc qu'une plage privée
+// d'au plus 65 536 adresses, et un domaine sous .internal.
+func ReseauAcceptable(reseau netip.Prefix, domaine string) error {
+	prive := false
+	for _, p := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"} {
+		plage := netip.MustParsePrefix(p)
+		if plage.Bits() <= reseau.Bits() && plage.Contains(reseau.Addr()) {
+			prive = true
+		}
+	}
+	if !reseau.Addr().Is4() || !prive || reseau.Bits() < 16 {
+		return fmt.Errorf("réseau %s refusé : il faut une plage privée, /16 au plus large", reseau)
+	}
+	if domaine != "" && domaine != "internal" && !strings.HasSuffix(domaine, ".internal") {
+		return fmt.Errorf("domaine %q refusé : il doit finir par .internal", domaine)
+	}
+	return nil
 }

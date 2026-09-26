@@ -298,23 +298,33 @@ func cmdVerrou(args []string) {
 				meurt("liste actuelle illisible : %v", err)
 			}
 		}
+		// La liste actuelle vient du serveur : on ne la reprend que signée
+		// par ce verrou. Sinon, un serveur piraté ferait signer à l'admin
+		// des bannissements qu'il n'a pas choisis, ou une version au plafond.
+		if len(l.Cles) > 0 || l.Version > 0 {
+			if _, ok := client.RevocationsSignees(&l, prive.Public().(ed25519.PublicKey)); !ok {
+				meurt("la liste actuelle n'est pas signée par ce verrou : refusée")
+			}
+		}
+		var nouvelles []string
 		for _, k := range strings.Split(*cles, ",") {
-			if k = strings.TrimSpace(k); k != "" && !slices.Contains(l.Cles, k) {
-				l.Cles = append(l.Cles, k)
-				fmt.Fprintf(os.Stderr, "révoquée : %s\n", client.EmpreinteCle(k))
-			}
+			nouvelles = append(nouvelles, strings.TrimSpace(k))
 		}
-		var brutes [][32]byte
-		for _, c := range l.Cles {
-			b, err := b64.Decoder(c)
-			if err != nil || len(b) != 32 {
-				meurt("clé illisible : %s", c)
-			}
-			brutes = append(brutes, [32]byte(b))
+		suite, _, err := client.AllongerRevocations(prive, 0, nil, &l, nouvelles)
+		if err != nil {
+			meurt("%v", err)
 		}
-		l.Version++
-		l.Signature = base64.StdEncoding.EncodeToString(verrou.SignerRevocations(prive, l.Version, brutes))
-		json.NewEncoder(os.Stdout).Encode(l)
+		// Toute la liste signée, pas seulement ce qui s'ajoute : l'admin voit
+		// ce qu'il signe.
+		for _, k := range suite.Cles {
+			etat := "déjà révoquée"
+			if !slices.Contains(l.Cles, k) {
+				etat = "révoquée"
+			}
+			fmt.Fprintf(os.Stderr, "%-14s %s\n", etat, client.EmpreinteCle(k))
+		}
+		fmt.Fprintf(os.Stderr, "liste version %d, %d clés\n", suite.Version, len(suite.Cles))
+		json.NewEncoder(os.Stdout).Encode(suite)
 
 	default:
 		meurt("usage : sas verrou creer|signer|politique|revoquer --fichier F")

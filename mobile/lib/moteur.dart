@@ -10,8 +10,20 @@ const _canal = MethodChannel('fr.cybersas/moteur');
 
 /// Une erreur du moteur, prête à afficher.
 class ErreurMoteur implements Exception {
-  ErreurMoteur(this.message);
+  ErreurMoteur(this.message, {this.code = 'moteur'});
   final String message;
+
+  /// « annulee » : l'invite d'empreinte a été fermée. « coffre » : le
+  /// coffre ne s'ouvre plus (empreinte ajoutée au téléphone), il a été
+  /// effacé. « impossible » : pas d'empreinte sur ce téléphone.
+  final String code;
+
+  /// L'utilisateur a fermé l'invite d'empreinte : rien à afficher.
+  bool get annulee => code == 'annulee';
+
+  /// Le coffre de la clé du verrou a été effacé par Android.
+  bool get coffrePerdu => code == 'coffre';
+
   @override
   String toString() => message;
 }
@@ -36,7 +48,7 @@ abstract final class Moteur {
       });
       return jsonDecode(s!) as Map<String, dynamic>;
     } on PlatformException catch (e) {
-      throw ErreurMoteur(e.message ?? e.code);
+      throw ErreurMoteur(e.message ?? e.code, code: e.code);
     }
   }
 
@@ -56,7 +68,7 @@ abstract final class Moteur {
     try {
       await _canal.invokeMethod<void>('quitter');
     } on PlatformException catch (e) {
-      throw ErreurMoteur(e.message ?? e.code);
+      throw ErreurMoteur(e.message ?? e.code, code: e.code);
     }
   }
 
@@ -64,7 +76,7 @@ abstract final class Moteur {
     try {
       return await _canal.invokeMethod<T>(methode, args);
     } on PlatformException catch (e) {
-      throw ErreurMoteur(e.message ?? e.code);
+      throw ErreurMoteur(e.message ?? e.code, code: e.code);
     }
   }
 
@@ -88,17 +100,27 @@ abstract final class Moteur {
     }
   }
 
-  /// Range la clé du verrou dans le coffre. Juste après l'empreinte.
-  static Future<String> rangerVerrou(String graine) async => await _appel<String>('coffreRanger', {'graine': graine}) ?? '';
+  /// Range la clé du verrou dans le coffre. Android vérifie d'abord que
+  /// c'est bien celle du verrou de ce réseau, puis ouvre l'invite
+  /// d'empreinte ([titre]) : c'est elle qui autorise le rangement. Rend
+  /// l'empreinte du verrou.
+  static Future<String> rangerVerrou(String graine, {required String titre}) async =>
+      await _appel<String>('coffreRanger', {'graine': graine, 'titre': titre}) ?? '';
 
   static Future<void> effacerVerrou() => _appel<void>('coffreEffacer');
 
-  /// Signe ces appareils avec la clé du coffre. Juste après l'empreinte.
-  static Future<int> signer(String cles) async => await _appel<int>('signer', {'cles': cles}) ?? 0;
+  /// Signe ces [fiches] (JSON, telles que [appareils] les a rendues) avec
+  /// la clé du coffre. L'invite d'empreinte d'Android ([titre], [detail])
+  /// ouvre le coffre pour cette seule signature ; le moteur refuse si le
+  /// serveur a changé une fiche entre-temps.
+  static Future<int> signer(String fiches, {required String titre, required String detail}) async =>
+      await _appel<int>('signer', {'fiches': fiches, 'titre': titre, 'detail': detail}) ?? 0;
 
-  /// Admin : révoque ces appareils avec la clé du verrou (sortie du coffre
-  /// après l'empreinte). Rend la version de la nouvelle liste.
-  static Future<int> revoquer(String cles) async => await _appel<int>('revoquer', {'cles': cles}) ?? 0;
+  /// Admin : révoque ces appareils (clés séparées par des virgules) avec la
+  /// clé du verrou, sortie du coffre par l'invite d'empreinte. Rend la
+  /// version de la nouvelle liste.
+  static Future<int> revoquer(String cles, {required String titre, required String detail}) async =>
+      await _appel<int>('revoquer', {'cles': cles, 'titre': titre, 'detail': detail}) ?? 0;
 
   /// Admin : un lien d'invitation pour un membre de l'équipe.
   static Future<String> inviter(String utilisateur, int minutes) async =>

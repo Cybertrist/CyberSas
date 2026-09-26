@@ -37,7 +37,7 @@ class EcranDemandes extends StatelessWidget {
                       Text('Demandes en attente', style: titre(26)),
                       const SizedBox(height: 8),
                       Text(
-                        "Vérifie que l'empreinte affichée ici est la même que sur l'appareil, puis signe avec ton doigt.",
+                        "Vérifie que l'empreinte est la même que sur l'appareil, relis ce que tu signes, puis pose ton doigt.",
                         style: texte(13.5, couleur: Couleurs.secondaire, hauteur: 1.4),
                       ),
                     ]),
@@ -112,6 +112,8 @@ class _CarteDemande extends StatelessWidget {
         const SizedBox(height: 8),
         Empreinte(d.empreinte, couleur: Couleurs.texte),
         const SizedBox(height: 14),
+        _CeQuiEstSigne(d: d),
+        const SizedBox(height: 14),
         Row(children: [
           Expanded(
             child: BoutonFantome(
@@ -137,6 +139,54 @@ class _CarteDemande extends StatelessWidget {
   }
 }
 
+/// Ce que le verrou inscrira dans le certificat, tel que le serveur le
+/// propose : l'admin le voit avant de poser le doigt. Un serveur piraté qui
+/// glisserait « admins » ou l'adresse d'une autre machine se voit ici.
+class _CeQuiEstSigne extends StatelessWidget {
+  const _CeQuiEstSigne({required this.d});
+  final Demande d;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget ligne(String libelle, String valeur, {bool monoValeur = false, Color couleur = Couleurs.texte}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(children: [
+            Text(libelle, style: texte(13, couleur: Couleurs.secondaire)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                valeur,
+                textAlign: TextAlign.right,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: monoValeur ? mono(13, graisse: 500, couleur: couleur) : texte(13, graisse: 600, couleur: couleur),
+              ),
+            ),
+          ]),
+        );
+    final admins = d.groupe == 'admins';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        color: Couleurs.bloc,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Couleurs.bordure),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Etiquette('Ce que tu signes'),
+        const SizedBox(height: 4),
+        ligne('Adresse', d.adresse.isEmpty ? '?' : d.adresse, monoValeur: true),
+        // « admins » donne les droits d'admin : en cyan, pour ne pas passer
+        // inaperçu.
+        ligne('Groupe', d.groupe.isEmpty ? '?' : (admins ? "admins, droits d'admin" : d.groupe),
+            couleur: admins ? Couleurs.cyan : Couleurs.texte),
+        ligne(d.etiquette.isNotEmpty ? 'Machine' : 'Propriétaire', d.etiquette.isNotEmpty ? d.etiquette : d.titulaire),
+        ligne('Validité', '${Demande.dureeSignature} jours'),
+      ]),
+    );
+  }
+}
+
 /// « Signer » : l'invite d'empreinte d'Android s'ouvre tout de suite, sans
 /// fenêtre intermédiaire.
 class _BoutonSigner extends StatefulWidget {
@@ -151,8 +201,9 @@ class _BoutonSignerState extends State<_BoutonSigner> {
   bool _enCours = false;
 
   // La clé du verrou est dans le coffre du téléphone (Coffre.kt), sous une
-  // clé du Keystore qui ne sert que dans les secondes qui suivent cette
-  // empreinte : sans le doigt, pas de signature.
+  // clé du Keystore qui ne s'ouvre que pour une opération autorisée par
+  // l'empreinte. L'invite vient d'Android (MainActivity), liée à cette
+  // signature-là : pas d'invite ici, elle n'ouvrirait rien.
   Future<void> _signer() async {
     if (_enCours) return;
     final r = EtatReseau.of(context);
@@ -166,17 +217,10 @@ class _BoutonSignerState extends State<_BoutonSigner> {
       ));
       return;
     }
-    final identite = await confirmerIdentite('Signer ${d.nom} (${d.empreinte.join('-')})');
-    switch (identite) {
-      case Identite.confirmee:
-        final e = await r.signer(d);
-        messager.showSnackBar(SnackBar(content: Text(e ?? '${d.nom} signé : il rejoint le réseau')));
-      case Identite.impossible:
-        messager.showSnackBar(const SnackBar(
-          content: Text("Aucune empreinte enregistrée sur ce téléphone : ajoute-en une dans les réglages d'Android."),
-        ));
-      case Identite.annulee:
-        break;
+    final e = await r.signer(d);
+    // Invite fermée : on revient, sans rien dire.
+    if (e != operationAnnulee) {
+      messager.showSnackBar(SnackBar(content: Text(e ?? '${d.nom} signé : il rejoint le réseau')));
     }
     if (mounted) setState(() => _enCours = false);
   }

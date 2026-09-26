@@ -56,6 +56,21 @@ func TestRoutesAdmin(t *testing.T) {
 	admin := b.inscrire("", "admin@x.fr", "fold")
 	alice := b.inscrire("", "alice@x.fr", "portable")
 
+	// Avec un verrou, un compte d'admin ne suffit pas : son appareil doit
+	// être signé pour le groupe « admins ».
+	if code := b.appel("GET", protocole.CheminAppareils, admin.Jeton, nil, nil); code != http.StatusForbidden {
+		t.Errorf("admin pas encore signé : %d, 403 attendu", code)
+	}
+	b.certifier(t, prive, admin, "equipe", time.Hour)
+	if code := b.appel("GET", protocole.CheminAppareils, admin.Jeton, nil, nil); code != http.StatusForbidden {
+		t.Errorf("admin signé pour « equipe » : %d, 403 attendu", code)
+	}
+	b.certifier(t, prive, admin, "admins", -time.Hour)
+	if code := b.appel("GET", protocole.CheminAppareils, admin.Jeton, nil, nil); code != http.StatusForbidden {
+		t.Errorf("certificat d'admin expiré : %d, 403 attendu", code)
+	}
+	b.certifier(t, prive, admin, "admins", time.Hour)
+
 	for _, c := range []struct{ methode, chemin string }{
 		{"GET", protocole.CheminAppareils}, {"POST", protocole.CheminSignatures}, {"POST", protocole.CheminRetrait},
 	} {
@@ -167,6 +182,7 @@ func TestRevocations(t *testing.T) {
 	admin := b.inscrire("", "admin@x.fr", "fold")
 	alice := b.inscrire("", "alice@x.fr", "portable")
 	bob := b.inscrire("", "bob@x.fr", "tel")
+	b.certifier(t, prive, admin, "admins", time.Hour)
 
 	liste := func(cle []byte, version uint64, cles ...string) protocole.ListeRevocations {
 		var brutes [][32]byte
@@ -210,5 +226,56 @@ func TestRevocations(t *testing.T) {
 	}
 	if code := b.appel("GET", protocole.CheminReseau, alice.Jeton, nil, nil); code != http.StatusUnauthorized {
 		t.Errorf("Alice révoquée répond encore : %d", code)
+	}
+}
+
+// certifier : l'appareil reçoit son certificat, comme par « sas verrou
+// signer » en ligne de commande. expire peut être négatif.
+func (b *banc) certifier(t *testing.T, prive []byte, r protocole.ReponseConnexion, groupe string, expire time.Duration) {
+	t.Helper()
+	k, _ := b64.Cle32(r.Appareil.ClePublique)
+	c := verrou.Certificat{Cle: k, Adresse: netip.MustParseAddr(r.Appareil.Adresse), Proprietaire: r.Appareil.Proprietaire,
+		Groupe: groupe, Expire: time.Now().Add(expire).Truncate(time.Second)}
+	sig, err := c.Signer(prive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.srv.base.DefinirCertificat(r.Appareil.ClePublique, c.Adresse, sig, groupe, c.Expire); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Deux listes envoyées en même temps : la plus récente gagne toujours, et
+// le fichier reste lisible. Chaque liste contient les précédentes.
+func TestRevocationsSimultanees(t *testing.T) {
+	b := nouveauBanc(t)
+	pub, prive, _ := verrou.Generer()
+	cheminVerrou := filepath.Join(b.dossier, "verrou")
+	os.WriteFile(cheminVerrou, []byte(base64.StdEncoding.EncodeToString(pub)), 0o600)
+	b.srv.cfg.Verrou = cheminVerrou
+	b.srv.cfg.RevocationsAppli = filepath.Join(b.dossier, "revocations-appli.json")
+	os.WriteFile(b.srv.cfg.Equipe, []byte("admin@x.fr admins\n"), 0o600)
+	admin := b.inscrire("", "admin@x.fr", "fold")
+	b.certifier(t, prive, admin, "admins", time.Hour)
+	liste := func(version uint64) protocole.ListeRevocations {
+		var cles []string
+		var brutes [][32]byte
+		for i := range version {
+			var k [32]byte
+			k[0], k[31] = byte(i), 7
+			cles = append(cles, base64.StdEncoding.EncodeToString(k[:]))
+			brutes = append(brutes, k)
+		}
+		return protocole.ListeRevocations{Version: version, Cles: cles,
+			Signature: base64.StdEncoding.EncodeToString(verrou.SignerRevocations(prive, version, brutes))}
+	}
+	for v := uint64(1); v <= 40; v += 2 {
+		fini := make(chan struct{})
+		go func() { b.appel("POST", protocole.CheminRevocations, admin.Jeton, liste(v+1), nil); close(fini) }()
+		b.appel("POST", protocole.CheminRevocations, admin.Jeton, liste(v), nil)
+		<-fini
+		if l := b.srv.Revocations(); l == nil || l.Version != v+1 {
+			t.Fatalf("après v%d et v%d en même temps : %+v", v, v+1, l)
+		}
 	}
 }

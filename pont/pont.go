@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -94,11 +95,15 @@ func Inscription(dossier string) string {
 // Quitter : se désinscrit auprès du serveur, puis oublie tout. L'état
 // local est effacé même si le serveur ne répond pas.
 func Quitter(dossier string) error {
-	Arreter()
+	// Attendre vraiment la fin du moteur : une synchronisation en cours
+	// réécrirait sinon etat.json, clé privée comprise, juste après qu'on
+	// l'a effacé. Une requête à l'API dure 20 secondes au plus.
+	arreter(25 * time.Second)
 	s := appareil.Stockage{Dossier: dossier}
 	e, err := s.Lire()
 	if err != nil {
-		return nil
+		// Illisible n'est pas absent : la clé est peut-être encore dedans.
+		return s.Effacer()
 	}
 	if a, err := api(e.Serveur, e.Autorite); err == nil {
 		_ = a.Appel("POST", protocole.CheminDeconnexion, e.Inscription.Jeton, nil, nil)
@@ -112,6 +117,7 @@ var (
 	mu       sync.Mutex
 	arret    context.CancelFunc
 	fini     chan struct{}
+	tour     int // le numéro du dernier Demarrer
 	derniere appareil.Vue
 	enMarche bool
 	erreur   string
@@ -130,6 +136,7 @@ func Demarrer(fd int, dossier string, p Protecteur) error {
 	// Non bloquant : Go passe par son ordonnanceur réseau, et fermer le
 	// fichier débloque une lecture en cours.
 	if err := unix.SetNonblock(fd, true); err != nil {
+		unix.Close(fd)
 		return err
 	}
 	f := os.NewFile(uintptr(fd), "tun")
@@ -152,13 +159,29 @@ func Demarrer(fd int, dossier string, p Protecteur) error {
 	ctx, annuler := context.WithCancel(context.Background())
 	termine := make(chan struct{})
 	mu.Lock()
+	tour++
+	montour := tour
 	arret, fini, enMarche, erreur, derniere = annuler, termine, true, "", appareil.Vue{}
 	mu.Unlock()
 
 	journal := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	go func() {
 		defer close(termine)
-		err := appareil.Tenir(ctx, appareil.Tenue{
+		var err error
+		// Sous gomobile, une panique tue tout le processus, interface
+		// comprise : on la change en erreur affichée.
+		defer func() {
+			if p := recover(); p != nil {
+				conn.Close()
+				f.Close()
+				mu.Lock()
+				if tour == montour {
+					enMarche, erreur = false, fmt.Sprint("moteur arrêté : ", p)
+				}
+				mu.Unlock()
+			}
+		}()
+		err = appareil.Tenir(ctx, appareil.Tenue{
 			Stockage: appareil.Stockage{Dossier: dossier}, Interface: iface{f}, Conn: conn, Journal: journal,
 			// L'autorité est relue à chaque appel : elle suit une réinscription.
 			API: func(s string) (*client.API, error) {
@@ -171,9 +194,13 @@ func Demarrer(fd int, dossier string, p Protecteur) error {
 		conn.Close()
 		f.Close()
 		mu.Lock()
-		enMarche = false
-		if err != nil {
-			erreur = err.Error()
+		// Un Demarrer plus récent a pu prendre la suite : son état n'est
+		// pas le nôtre.
+		if tour == montour {
+			enMarche = false
+			if err != nil {
+				erreur = err.Error()
+			}
 		}
 		mu.Unlock()
 	}()
@@ -181,7 +208,9 @@ func Demarrer(fd int, dossier string, p Protecteur) error {
 }
 
 // Arreter coupe le tunnel et attend que le moteur ait rendu l'interface.
-func Arreter() {
+func Arreter() { arreter(3 * time.Second) }
+
+func arreter(attente time.Duration) {
 	mu.Lock()
 	a, f := arret, fini
 	arret, fini = nil, nil
@@ -190,7 +219,7 @@ func Arreter() {
 		a()
 		select {
 		case <-f:
-		case <-time.After(3 * time.Second):
+		case <-time.After(attente):
 		}
 	}
 }

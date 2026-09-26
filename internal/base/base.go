@@ -424,9 +424,21 @@ func NouvelleCle() string {
 // CreerCle enregistre une clé d'inscription à usage unique. Pour une
 // machine, nom est le nom qu'elle portera dans le VPN.
 func (b *Base) CreerCle(cle, etiquette, utilisateur, nom string, expire time.Time) error {
+	// Une clé expirée ne sert plus à rien : on fait le ménage à chaque
+	// création, sinon seules les clés consommées quitteraient la table.
+	if _, err := b.db.Exec(`DELETE FROM cles WHERE expire < ?`, time.Now().Unix()); err != nil {
+		return err
+	}
 	_, err := b.db.Exec(`INSERT INTO cles (empreinte, etiquette, utilisateur, nom, expire) VALUES (?, ?, ?, ?, ?)`,
 		Empreinte(cle), etiquette, strings.ToLower(utilisateur), nom, expire.Unix())
 	return err
+}
+
+// ClesVivantes : le nombre de clés d'inscription pas encore expirées.
+func (b *Base) ClesVivantes() (int, error) {
+	var n int
+	err := b.db.QueryRow(`SELECT COUNT(*) FROM cles WHERE expire >= ?`, time.Now().Unix()).Scan(&n)
+	return n, err
 }
 
 // DefinirCertificat enregistre la signature du verrou pour un appareil,

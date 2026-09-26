@@ -35,6 +35,7 @@ Future<void> main() async {
     await reseau.charger();
   }
   if (reseau.ecranMasque) await masquerEcran(true);
+  WidgetsBinding.instance.addObserver(_BarrageRetour());
   runApp(CyberSas(reseau: reseau));
 }
 
@@ -70,16 +71,43 @@ class _Garde extends StatefulWidget {
 
 class _GardeState extends State<_Garde> with WidgetsBindingObserver {
   late bool _verrouillee = EtatReseau.of(context).verrouAppli;
-  DateTime? _partie;
+
+  /// Quand l'appli a été quittée, lu sur l'horloge du système (le temps
+  /// depuis le démarrage du téléphone) : reculer l'heure du téléphone ne
+  /// raccourcit pas l'absence.
+  Future<Duration>? _partie;
+
+  /// Un voile opaque sur l'appli dès qu'elle perd la main (volet des
+  /// notifications, applis récentes) : l'aperçu ne montre rien.
+  bool _voile = false;
+
+  /// Ce qu'on a dit à Android pour l'aperçu des applis récentes.
+  bool? _apercuProtege;
 
   /// Revenir dans l'appli moins de 30 s après l'avoir quittée ne la
   /// reverrouille pas.
   static const _grace = Duration(seconds: 30);
 
+  /// Sans le canal (tests), une horloge monotone du processus.
+  static final _chrono = Stopwatch()..start();
+
+  static Future<Duration> _maintenant() async => await horlogeSysteme() ?? _chrono.elapsed;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final r = EtatReseau.of(context);
+    final proteger = r.verrouAppli && r.inscrit;
+    if (proteger != _apercuProtege) {
+      _apercuProtege = proteger;
+      protegerApercu(proteger);
+    }
   }
 
   @override
@@ -90,36 +118,76 @@ class _GardeState extends State<_Garde> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState etat) {
-    if (etat == AppLifecycleState.hidden || etat == AppLifecycleState.paused) {
-      _partie ??= DateTime.now();
-    } else if (etat == AppLifecycleState.resumed) {
-      final partie = _partie;
-      _partie = null;
-      if (partie != null && EtatReseau.of(context).verrouAppli && DateTime.now().difference(partie) > _grace) {
-        // Le clavier se referme : il ne pousse pas l'écran de verrouillage.
-        FocusManager.instance.primaryFocus?.unfocus();
-        setState(() => _verrouillee = true);
-      }
+    final r = EtatReseau.of(context);
+    final garde = r.verrouAppli && r.inscrit;
+    switch (etat) {
+      case AppLifecycleState.inactive || AppLifecycleState.hidden || AppLifecycleState.paused:
+        if (garde && !_voile) setState(() => _voile = true);
+        if (etat != AppLifecycleState.inactive) _partie ??= _maintenant();
+      case AppLifecycleState.resumed:
+        _revenir(garde);
+      case AppLifecycleState.detached:
+        break;
     }
+  }
+
+  /// De retour : reverrouille si l'absence a dépassé la grâce, ou si
+  /// l'horloge a reculé (impossible avec elapsedRealtime, sauf tricherie
+  /// ou redémarrage), puis lève le voile.
+  Future<void> _revenir(bool garde) async {
+    final partie = _partie;
+    _partie = null;
+    var reverrouiller = false;
+    if (partie != null && garde) {
+      final ecart = await _maintenant() - await partie;
+      reverrouiller = ecart.isNegative || ecart > _grace;
+    }
+    if (!mounted) return;
+    // Le clavier se referme : il ne pousse pas l'écran de verrouillage.
+    if (reverrouiller) FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      if (reverrouiller) _verrouillee = true;
+      _voile = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final r = EtatReseau.of(context);
     final verrou = _verrouillee && r.verrouAppli && r.inscrit;
+    _BarrageRetour.actif = verrou;
     return Stack(children: [
-      // Sous le verrou, rien ne répond au toucher ni au lecteur d'écran.
-      ExcludeSemantics(excluding: verrou, child: IgnorePointer(ignoring: verrou, child: widget.child)),
+      // Sous le verrou, rien ne répond au toucher, au clavier ni au lecteur
+      // d'écran.
+      ExcludeFocus(
+        excluding: verrou,
+        child: ExcludeSemantics(excluding: verrou, child: IgnorePointer(ignoring: verrou, child: widget.child)),
+      ),
       if (verrou)
         Positioned.fill(
           child: MediaQuery.removeViewInsets(
             context: context,
             removeBottom: true,
+            // Le geste retour est arrêté par _BarrageRetour : un PopScope,
+            // ici au-dessus du Navigator, n'aurait pas de route à retenir.
             child: EcranVerrou(deverrouiller: () => setState(() => _verrouillee = false)),
           ),
         ),
+      if (_voile && r.verrouAppli && r.inscrit) const Positioned.fill(child: ColoredBox(color: Couleurs.fond)),
     ]);
   }
+}
+
+/// Sous le verrou, le bouton ou le geste retour ne fait rien : sans lui, il
+/// fermerait la fenêtre ouverte sous l'écran de verrouillage (l'import de
+/// la clé, un renommage). Enregistré avant runApp, il passe avant le
+/// Navigator de MaterialApp (Flutter consulte les observateurs dans
+/// l'ordre).
+class _BarrageRetour with WidgetsBindingObserver {
+  static bool actif = false;
+
+  @override
+  Future<bool> didPopRoute() async => actif;
 }
 
 /// Pas encore de réseau : l'écran de connexion. Sinon, l'appli.

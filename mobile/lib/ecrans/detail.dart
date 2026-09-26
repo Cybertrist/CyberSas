@@ -493,7 +493,29 @@ class _BoutonRetirer extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Text('${revoquer ? 'Révoquer' : 'Retirer'} ${a.nomAffiche} ?', style: texte(20, graisse: 600, espacement: -0.4)),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
+              // Le nom, c'est le serveur qui le choisit : l'empreinte et
+              // l'adresse disent de quel appareil il s'agit vraiment.
+              Container(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                decoration: BoxDecoration(
+                  color: Couleurs.bloc,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Couleurs.bordure),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  for (final (libelle, valeur) in [('Empreinte', a.empreinte), ('Adresse', a.adresse.isEmpty ? '?' : a.adresse)])
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Row(children: [
+                        Text(libelle, style: texte(13, couleur: Couleurs.secondaire)),
+                        const Spacer(),
+                        Text(valeur, style: mono(13, graisse: 500)),
+                      ]),
+                    ),
+                ]),
+              ),
+              const SizedBox(height: 12),
               Text(
                 revoquer
                     ? "Sa clé est bannie pour de bon, signée par le verrou : aucun appareil ne l'acceptera plus, même si le serveur était piraté. Pour revenir, il lui faudra une nouvelle invitation, avec une nouvelle clé."
@@ -519,8 +541,18 @@ class _BoutonRetirer extends StatelessWidget {
       ),
     );
     if (oui != true) return;
-    if (await confirmerIdentite('${revoquer ? 'Révoquer' : 'Retirer'} ${a.nomAffiche}') != Identite.confirmee) return;
-    final e = revoquer ? await r.revoquerAppareil(a) : await r.retirerAppareil(a);
+    final String? e;
+    if (revoquer) {
+      // Révoquer demande la clé du verrou : l'invite d'empreinte vient
+      // d'Android, liée au coffre, et montre nom, empreinte et adresse.
+      e = await r.revoquerAppareil(a);
+      if (e == operationAnnulee) return;
+    } else {
+      // Retirer n'ouvre pas le coffre, mais demande le doigt quand même :
+      // un téléphone laissé ouvert ne vide pas le réseau.
+      if (await confirmerIdentite('Retirer ${a.nomAffiche} (${a.empreinte}, ${a.adresse})') != Identite.confirmee) return;
+      e = await r.retirerAppareil(a);
+    }
     messager.showSnackBar(SnackBar(content: Text(e ?? '${a.nomAffiche} ${revoquer ? 'révoqué' : 'retiré du réseau'}')));
     if (e == null) apres?.call();
   }

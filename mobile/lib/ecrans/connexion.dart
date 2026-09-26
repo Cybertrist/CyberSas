@@ -238,6 +238,28 @@ class _CarteInvitation extends StatelessWidget {
         ligne(Ico.cle, "Clé d'inscription", 'usage unique'),
         ligne(Ico.bouclier, 'Verrou', i.verrou.isEmpty ? 'aucun' : empreinteCle(i.verrou), monoValeur: true),
         if (i.autorite.isNotEmpty) ligne(Ico.info, 'Certificat', 'autorité du labo'),
+        // Sans verrou dans le lien, l'appareil croira le premier qu'on lui
+        // annonce : un serveur piraté pourrait lui donner le sien.
+        if (i.verrou.isEmpty)
+          const _Avertissement(
+            "Ce lien ne donne pas la clé du verrou : l'appareil retiendra la première qu'on lui annonce. "
+            "Demande à l'admin un lien complet, ou compare l'empreinte du verrou avec la sienne dès que tu es inscrit.",
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 2),
+            child: Text(
+              "Compare cette empreinte du verrou avec celle que l'admin voit de son côté : si elle diffère, n'y va pas.",
+              style: texte(12.5, couleur: Couleurs.secondaire, hauteur: 1.4),
+            ),
+          ),
+        // Une autorité propre au lien : le certificat du serveur n'est pas
+        // vérifié par les autorités publiques, mais par celle-ci.
+        if (i.autorite.isNotEmpty)
+          const _Avertissement(
+            "Autorité de certification personnalisée (labo) : ce lien dit à l'appareil quel certificat croire pour ce "
+            "serveur. N'accepte que si l'invitation vient bien de ton admin.",
+          ),
         const SizedBox(height: 6),
         Text(
           "Cet appareil crée sa clé ici, elle n'en sortira pas. L'admin devra ensuite le signer.",
@@ -246,6 +268,31 @@ class _CarteInvitation extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// Un point de l'invitation qui mérite l'attention, en rouge.
+class _Avertissement extends StatelessWidget {
+  const _Avertissement(this.message);
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(
+          color: Couleurs.rouge.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Couleurs.rouge.withValues(alpha: 0.35)),
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: Icone(Ico.info, couleur: Couleurs.rougeClair, taille: 16),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text(message, style: texte(12.5, couleur: Couleurs.texte, hauteur: 1.4))),
+        ]),
+      );
 }
 
 class _Logo extends StatelessWidget {

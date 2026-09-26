@@ -80,6 +80,11 @@ type Serveur struct {
 	// relations : les paires de numéros d'appareils que le moteur a le
 	// droit de relayer, et les mêmes en adresses pour le DNS. Lues à chaque
 	// trame, d'où un verrou à part.
+	// muRevocations tient une liste reçue de l'appli de la comparaison
+	// avec celle en vigueur jusqu'à son écriture : deux envois simultanés
+	// ne peuvent ni faire reculer la liste, ni mêler leurs octets.
+	muRevocations sync.Mutex
+
 	muRelations sync.RWMutex
 	relations   map[[2]uint32]bool
 	voit        map[[2]netip.Addr]bool

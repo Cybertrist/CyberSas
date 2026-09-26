@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -28,9 +29,21 @@ import (
 // longueurLibelle : un nom affiché, pas un roman.
 const longueurLibelle = 40
 
-// estAdmin : la personne est dans le groupe « admins » de l'équipe.
+// maxInvitations : les clés d'inscription vivantes, toutes à la fois.
+const maxInvitations = 50
+
+// estAdmin : la personne est dans le groupe « admins » de l'équipe. Avec
+// un verrou, il faut en plus que cet appareil-là porte un certificat en
+// cours de validité, signé pour le groupe « admins » : un compte Google
+// d'admin volé inscrit un appareil, pas un appareil d'admin.
 func (s *Serveur) estAdmin(a base.Appareil) bool {
-	return a.Proprietaire != "" && s.chargerEquipe()[a.Proprietaire] == "admins"
+	if a.Proprietaire == "" || s.chargerEquipe()[a.Proprietaire] != "admins" {
+		return false
+	}
+	if cle, _ := s.verrou(); cle != nil {
+		return len(a.Signature) > 0 && a.SignatureGroupe == "admins" && time.Now().Before(a.SignatureExpire)
+	}
+	return true
 }
 
 // libelle change le nom affiché de son appareil ; un admin, de n'importe
@@ -195,6 +208,12 @@ func (s *Serveur) invitation(w http.ResponseWriter, r *http.Request) {
 	if d.Minutes != 0 {
 		minutes = min(max(d.Minutes, 1), 24*60)
 	}
+	// Un plafond : même un admin (ou son jeton volé) ne remplit pas la
+	// table de clés d'inscription vivantes.
+	if n, err := s.base.ClesVivantes(); err != nil || n >= maxInvitations {
+		refuser(w, http.StatusTooManyRequests, "trop d'invitations en cours")
+		return
+	}
 	cle, expire := base.NouvelleCle(), time.Now().Add(time.Duration(minutes)*time.Minute)
 	if err := s.base.CreerCle(cle, "", qui, "", expire); err != nil {
 		refuser(w, http.StatusInternalServerError, "invitation impossible")
@@ -245,6 +264,8 @@ func (s *Serveur) revocations(w http.ResponseWriter, r *http.Request) {
 		refuser(w, http.StatusBadRequest, "liste mal signée")
 		return
 	}
+	s.muRevocations.Lock()
+	defer s.muRevocations.Unlock()
 	if actuelle := s.Revocations(); actuelle != nil {
 		if l.Version <= actuelle.Version {
 			refuser(w, http.StatusConflict, "liste plus ancienne que celle en vigueur")
@@ -258,8 +279,8 @@ func (s *Serveur) revocations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	b, _ := json.Marshal(l)
-	tmp := s.cfg.RevocationsAppli + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil || os.Rename(tmp, s.cfg.RevocationsAppli) != nil {
+	if err := ecrireAtomique(s.cfg.RevocationsAppli, b); err != nil {
+		s.journal.Error("révocations non enregistrées", "evenement", "revocation", "erreur", err)
 		refuser(w, http.StatusInternalServerError, "liste non enregistrée")
 		return
 	}
@@ -274,4 +295,39 @@ func (s *Serveur) revocations(w http.ResponseWriter, r *http.Request) {
 		s.journal.Error("synchronisation après révocation", "evenement", "synchronisation", "erreur", err)
 	}
 	repondre(w, http.StatusOK, map[string]uint64{"version": l.Version})
+}
+
+// ecrireAtomique : un fichier temporaire propre à cet appel, écrit et
+// synchronisé, puis renommé : après une coupure de courant, on retrouve
+// l'ancienne liste ou la nouvelle, jamais un fichier vide ou coupé.
+func ecrireAtomique(chemin string, b []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(chemin), filepath.Base(chemin)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp) // sans effet une fois renommé
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, chemin); err != nil {
+		return err
+	}
+	if d, err := os.Open(filepath.Dir(chemin)); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+	return nil
 }

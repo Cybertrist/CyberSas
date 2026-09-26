@@ -107,7 +107,7 @@ L'essai vérifie entre autres que :
 
 Pour inviter un téléphone : `bash scripts/sas.sh invitation <adresse Google>` donne le lien à ouvrir sur lui, puis `bash scripts/sas.sh signer <sa clé publique>` signe sa demande depuis l'ordinateur, si on ne le fait pas depuis l'appli.
 
-Les tests du code se lancent à part : `go test -race ./...` (87 tests, dont les vecteurs officiels de Noise et du fuzzing).
+Les tests du code se lancent à part : `go test -race ./...` (79 tests, dont les vecteurs officiels de Noise, et 8 cibles de fuzzing).
 
 Pour brancher la connexion Google des pages web, créer dans la [console Google Cloud](https://console.cloud.google.com/apis/credentials) un ID client OAuth de type **Application Web**, avec comme URI de redirection `https://auth.<domaine>/oauth2/callback`, puis :
 
@@ -137,7 +137,7 @@ Pour aller plus loin, quatre documents, dessinés comme ce README :
 <a name="la-feuille-de-route"></a>
 <img src="docs/sections/s10.png" alt="10 La feuille de route" width="100%">
 
-<img src="docs/schemas/feuille.png" alt="La feuille de route. Fait : le tunnel, le serveur et le verrou, 87 tests Go et 18 vérifications de bout en bout ; trois audits ; l'appli Android avec le vrai tunnel ; l'admin depuis le téléphone, signer, refuser, inviter, renommer, retirer, révoquer. En cours : la connexion Google dans l'appli. À venir : l'équipe depuis l'appli ; le serveur en ligne, d'abord à la maison puis sur un VPS ; un secours pour la clé du verrou. À discuter : l'appli Windows ; un site vitrine et une console web qui ne peut pas signer." width="100%">
+<img src="docs/schemas/feuille.png" alt="La feuille de route. Fait : le tunnel, le serveur et le verrou, 79 tests Go, 8 cibles de fuzzing et 18 vérifications de bout en bout ; trois audits ; l'appli Android avec le vrai tunnel ; l'admin depuis le téléphone, signer, refuser, inviter, renommer, retirer, révoquer. En cours : la connexion Google dans l'appli. À venir : l'équipe depuis l'appli ; le serveur en ligne, d'abord à la maison puis sur un VPS ; un secours pour la clé du verrou. À discuter : l'appli Windows ; un site vitrine et une console web qui ne peut pas signer." width="100%">
 
 Les figures de ce README sont dessinées par les scripts de [`docs/tools`](docs/tools) : aucune ne sort d'un logiciel de dessin, et chaque animation est vérifiée image par image avant d'être publiée.
 

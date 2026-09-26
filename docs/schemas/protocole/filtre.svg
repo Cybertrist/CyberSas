@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 530" width="1280" height="530" role="img" aria-label="Le filtre, chez l'appareil qui reçoit. Un paquet entrant, déjà déchiffré, passe deux questions : une règle l'autorise-t-elle pour ce pair, ce protocole et ce port ? Sinon, répond-il à un flux que l'appareil a lui-même ouvert vers ce pair ? Oui à l'une : il entre. Non aux deux : il est jeté en silence. Trois exemples : TCP 443 autorisé par une règle entre ; TCP 22 sans règle est jeté ; UDP 53, réponse à une question de l'appareil, entre. Les flux sont suivis cinq minutes en TCP, une en UDP, trente secondes pour un écho, avec un budget par pair.">
+<title>Le filtre, chez l'appareil qui reçoit. Un paquet entrant, déjà déchiffré, passe deux questions : une règle l'autorise-t-elle pour ce pair, ce protocole et ce port ? Sinon, répond-il à un flux que l'appareil a lui-même ouvert vers ce pair ? Oui à l'une : il entre. Non aux deux : il est jeté en silence. Trois exemples : TCP 443 autorisé par une règle entre ; TCP 22 sans règle est jeté ; UDP 53, réponse à une question de l'appareil, entre. Les flux sont suivis cinq minutes en TCP, une en UDP, trente secondes pour un écho, avec un budget par pair.</title>
+<defs>
+  <filter id="halo" x="-50%" y="-50%" width="200%" height="200%">
+    <feGaussianBlur stdDeviation="6" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="doux" x="-50%" y="-50%" width="200%" height="200%">
+    <feGaussianBlur stdDeviation="3" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="flou" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>
+  <pattern id="grille" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M40 0H0V40" fill="none" stroke="#31E7FD" stroke-opacity="0.05"/>
+  </pattern>
+  <radialGradient id="lueur" cx="50%" cy="0%" r="80%">
+    <stop offset="0" stop-color="#31E7FD" stop-opacity="0.10"/><stop offset="1" stop-color="#31E7FD" stop-opacity="0"/>
+  </radialGradient>
+  <marker id="pCYAN" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#31E7FD"/></marker>
+  <marker id="pBLEU" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#01B9FD"/></marker>
+  <marker id="pVERT" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#3DDC97"/></marker>
+  <marker id="pROUGE" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#FF5C63"/></marker>
+  <marker id="pFIL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#2F3A47"/></marker>
+  <marker id="pDISCRET" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#5C6A7A"/></marker>
+</defs>
+<rect width="1280" height="530" rx="16" fill="#0D1117"/>
+<rect width="1280" height="530" rx="16" fill="url(#grille)"/>
+<rect width="1280" height="530" rx="16" fill="url(#lueur)"/>
+
+<text x="640" y="56" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" fill="#31E7FD" text-anchor="middle" letter-spacing="3" >LE FILTRE, CHEZ CELUI QUI REÇOIT</text><text x="640" y="84" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="15" font-weight="400" fill="#94A3B0" text-anchor="middle" >Le serveur ne voit plus les paquets entre appareils : chaque appareil décide lui-même de ce qui entre.</text>
+<g opacity="1"><path d="M 290 228 L 400 228" fill="none" stroke="#2F3A47" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 7" marker-end="url(#pFIL)"><animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path><circle cx="290" cy="228" r="3.5" fill="#0D1117" stroke="#2F3A47" stroke-width="2"/></g><g opacity="1"><path d="M 730 228 L 900 228" fill="none" stroke="#3DDC97" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 7" marker-end="url(#pVERT)"><animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path><circle cx="730" cy="228" r="3.5" fill="#0D1117" stroke="#3DDC97" stroke-width="2"/></g><g opacity="1"><path d="M 565 266 L 565 360" fill="none" stroke="#FF5C63" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 7" marker-end="url(#pROUGE)"><animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path><circle cx="565" cy="266" r="3.5" fill="#0D1117" stroke="#FF5C63" stroke-width="2"/></g>
+<g opacity="1"><path d="M 730 382.8 C 815 382.8 815 247 900 247" fill="none" stroke="#3DDC97" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 7" marker-end="url(#pVERT)"><animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path><circle cx="730" cy="382.8" r="3.5" fill="#0D1117" stroke="#3DDC97" stroke-width="2"/></g><g opacity="1"><path d="M 730 413.2 C 815 413.2 815 413.2 900 413.2" fill="none" stroke="#FF5C63" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 7" marker-end="url(#pROUGE)"><animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path><circle cx="730" cy="413.2" r="3.5" fill="#0D1117" stroke="#FF5C63" stroke-width="2"/></g>
+<g>
+  <rect x="40" y="190" width="250" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  
+  <rect x="40" y="204" width="3" height="48" rx="1.5" fill="#31E7FD"/>
+  <g transform="translate(58,214)"><path d="M3 14 H7 L10 6 L14 22 L18 10 L21 14 H25" fill="none" stroke="#31E7FD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <text x="98" y="225" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >paquet entrant</text>
+  <text x="98" y="245" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >déjà déchiffré</text>
+</g><g>
+  <rect x="400" y="190" width="330" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  
+  <rect x="400" y="204" width="3" height="48" rx="1.5" fill="#01B9FD"/>
+  <g transform="translate(418,214)"><path d="M7 2 H17 L23 8 V26 H7 Z M17 2 V8 H23" fill="none" stroke="#01B9FD" stroke-width="2" stroke-linejoin="round"/><path d="M11 14 H19 M11 18 H19 M11 22 H16" stroke="#01B9FD" stroke-width="2" stroke-linecap="round"/></g>
+  <text x="458" y="225" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >une règle ?</text>
+  <text x="458" y="245" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >pour ce pair, ce protocole, ce port</text>
+</g><g>
+  <rect x="400" y="360" width="330" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  
+  <rect x="400" y="374" width="3" height="48" rx="1.5" fill="#01B9FD"/>
+  <g transform="translate(418,384)"><path d="M3 14 H7 L10 6 L14 22 L18 10 L21 14 H25" fill="none" stroke="#01B9FD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <text x="458" y="395" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >une réponse ?</text>
+  <text x="458" y="415" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >à un flux que j’ai ouvert vers lui</text>
+</g><g>
+  <rect x="900" y="190" width="300" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  
+  <rect x="900" y="204" width="3" height="48" rx="1.5" fill="#3DDC97"/>
+  <g transform="translate(918,214)"><path d="M14 2 L24 6 V13 C24 19 19.5 23.5 14 26 C8.5 23.5 4 19 4 13 V6 Z" fill="none" stroke="#3DDC97" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 14 L12.5 17 L18.5 11" fill="none" stroke="#3DDC97" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <text x="958" y="225" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >il entre</text>
+  <text x="958" y="245" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >remis à l’appareil</text>
+</g><g>
+  <rect x="900" y="360" width="300" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  
+  <rect x="900" y="374" width="3" height="48" rx="1.5" fill="#FF5C63"/>
+  <g transform="translate(918,384)"><circle cx="14" cy="14" r="11" fill="none" stroke="#FF5C63" stroke-width="2"/><path d="M10 10 L18 18 M18 10 L10 18" stroke="#FF5C63" stroke-width="2" stroke-linecap="round"/></g>
+  <text x="958" y="395" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >jeté</text>
+  <text x="958" y="415" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >en silence</text>
+</g>
+<text x="815" y="216" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#3DDC97" text-anchor="middle" >oui</text>
+<text x="577" y="317" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#FF5C63" text-anchor="start" >non</text>
+<text x="744" y="372.8" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#3DDC97" text-anchor="start" >oui</text>
+<text x="744" y="435.2" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#FF5C63" text-anchor="start" >non</text>
+<g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.02;0.2;0.22;1" values="0;1;1;0;0"/><rect x="42.2" y="144" width="245.6" height="32" rx="9" fill="#0B1A14" stroke="#3DDC97" stroke-opacity="0.6"/><text x="165" y="164.32" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#3DDC97" text-anchor="middle" >TCP 443 · une règle l’autorise</text></g><g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.005;0.02;0.08;0.095;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="11" fill="#3DDC97" opacity="0.22"/><circle r="6" fill="#3DDC97"/><animateMotion dur="12s" repeatCount="indefinite" path="M 290 228 L 400 228" calcMode="linear" keyTimes="0;0.02;0.08;1" keyPoints="0;0;1;1"/></g></g><g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.085;0.1;0.18;0.195;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="11" fill="#3DDC97" opacity="0.22"/><circle r="6" fill="#3DDC97"/><animateMotion dur="12s" repeatCount="indefinite" path="M 730 228 L 900 228" calcMode="linear" keyTimes="0;0.1;0.18;1" keyPoints="0;0;1;1"/></g></g>
+<g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.32;0.34;0.58;0.6;1" values="0;0;1;1;0;0"/><rect x="75.14" y="144" width="179.72" height="32" rx="9" fill="#1A0D10" stroke="#FF5C63" stroke-opacity="0.6"/><text x="165" y="164.32" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#FF5C63" text-anchor="middle" >TCP 22 · aucune règle</text></g><g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.325;0.34;0.4;0.415;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="11" fill="#FF5C63" opacity="0.22"/><circle r="6" fill="#FF5C63"/><animateMotion dur="12s" repeatCount="indefinite" path="M 290 228 L 400 228" calcMode="linear" keyTimes="0;0.34;0.4;1" keyPoints="0;0;1;1"/></g></g><g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.405;0.42;0.46;0.475;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="11" fill="#FF5C63" opacity="0.22"/><circle r="6" fill="#FF5C63"/><animateMotion dur="12s" repeatCount="indefinite" path="M 565 266 L 565 360" calcMode="linear" keyTimes="0;0.42;0.46;1" keyPoints="0;0;1;1"/></g></g><g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.465;0.48;0.56;0.575;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="11" fill="#FF5C63" opacity="0.22"/><circle r="6" fill="#FF5C63"/><animateMotion dur="12s" repeatCount="indefinite" path="M 730 413.2 C 815 413.2 815 413.2 900 413.2" calcMode="linear" keyTimes="0;0.48;0.56;1" keyPoints="0;0;1;1"/></g></g>
+<g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.64;0.66;0.9;0.92;1" values="0;0;1;1;0;0"/><rect x="42.2" y="144" width="245.6" height="32" rx="9" fill="#0B1A14" stroke="#3DDC97" stroke-opacity="0.6"/><text x="165" y="164.32" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#3DDC97" text-anchor="middle" >UDP 53 · réponse à ma question</text></g><g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.645;0.66;0.72;0.735;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="11" fill="#3DDC97" opacity="0.22"/><circle r="6" fill="#3DDC97"/><animateMotion dur="12s" repeatCount="indefinite" path="M 290 228 L 400 228" calcMode="linear" keyTimes="0;0.66;0.72;1" keyPoints="0;0;1;1"/></g></g><g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.725;0.74;0.78;0.795;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="11" fill="#3DDC97" opacity="0.22"/><circle r="6" fill="#3DDC97"/><animateMotion dur="12s" repeatCount="indefinite" path="M 565 266 L 565 360" calcMode="linear" keyTimes="0;0.74;0.78;1" keyPoints="0;0;1;1"/></g></g><g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.785;0.8;0.88;0.895;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="11" fill="#3DDC97" opacity="0.22"/><circle r="6" fill="#3DDC97"/><animateMotion dur="12s" repeatCount="indefinite" path="M 730 382.8 C 815 382.8 815 247 900 247" calcMode="linear" keyTimes="0;0.8;0.88;1" keyPoints="0;0;1;1"/></g></g>
+<text x="640" y="500" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="13.5" font-weight="400" fill="#94A3B0" text-anchor="middle" >Suivi des flux : cinq minutes en TCP, une en UDP, trente secondes pour un écho. Chaque pair a son propre budget.</text>
+</svg>

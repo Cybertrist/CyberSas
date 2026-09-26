@@ -107,7 +107,7 @@ b{font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:500;letter
 .v{--a:#3DDC97}.c{--a:#31E7FD}.g{--a:#5C6A7A}.o{--a:#94A3B0}
 .g i:after,.o i:after{background:transparent}
 </style></head><body><div class="w">
-$(etape fait 'Le tunnel, le serveur et le verrou' 'Noise IK, relais chiffré de bout en bout, certificats, politique et révocations signés. 87 tests Go, 18 vérifications de bout en bout dans le labo.')
+$(etape fait 'Le tunnel, le serveur et le verrou' 'Noise IK, relais chiffré de bout en bout, certificats, politique et révocations signés. 79 tests Go, 8 cibles de fuzzing, 18 vérifications de bout en bout dans le labo.')
 $(etape fait 'Trois audits' '46 constats de trois relecteurs et d’une revue de sécurité, 10 aux outils du métier, puis 23 sur l’appli et l’admin à distance. Tous traités, un seul accepté et expliqué.')
 $(etape fait 'L’appli Android, avec le vrai tunnel' 'Le moteur Go embarqué et le service VPN d’Android : sur le Fold, l’interrupteur ouvre un vrai tunnel vers le labo.')
 $(etape fait 'L’admin depuis le téléphone' 'Signer une demande, refuser, inviter par un lien, renommer, retirer, révoquer. La clé du verrou dort dans la puce, une empreinte par signature.')

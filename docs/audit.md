@@ -1,10 +1,19 @@
-# Audit de sécurité
+<div align="center">
 
-Ce document rend compte de la relecture de sécurité de CyberSas, menée le
-24 septembre 2026 : qui a relu quoi, ce qui a été trouvé, ce qui a été
-corrigé, et ce qui reste.
+<img src="banniere-audit.png" alt="Document : l'audit. Trois relectures, 79 constats : qui a relu quoi, ce qui a été trouvé, ce qui a été corrigé, et ce qui reste." width="100%">
 
-## Ce que cet audit est, et ce qu'il n'est pas
+</div>
+
+<br>
+
+Ce document rend compte des relectures de sécurité de CyberSas : qui a relu quoi, ce qui a été trouvé, ce qui a été corrigé, et ce qui reste. Les deux premières datent du 24 septembre 2026, la troisième du 26.
+
+<img src="schemas/audit/trois.png" alt="Trois audits. Premier audit, le 24 septembre : trois relecteurs indépendants, protocole, serveur et clients, puis une revue de sécurité des corrections ; 46 constats, dont 3 hauts. Deuxième audit, le même jour : les outils du métier, govulncheck, staticcheck, gosec, Semgrep, Trivy, Hadolint, ShellCheck, Gixy et du fuzzing différentiel ; 10 constats. Troisième audit, le 26 septembre : ce qui a changé depuis, les routes d'admin, l'Android natif, la frontière entre l'appli et le moteur ; 23 constats, dont 1 haut." width="100%">
+
+[Ce que cet audit est](#ce-que-cet-audit-est) · [Relancer les preuves](#relancer-les-preuves) · [Protocole](#protocole-et-cryptographie) · [Serveur](#serveur) · [Clients](#clients-et-deploiement) · [Revue](#revue-des-corrections) · [En corrigeant](#trouve-en-corrigeant) · [Deuxième audit](#deuxieme-audit) · [Troisième audit](#troisieme-audit) · [Ce qui reste](#ce-qui-reste)
+
+<a name="ce-que-cet-audit-est"></a>
+<img src="sections/audit/s01.png" alt="01 Ce que cet audit est" width="100%">
 
 Ce n'est **pas** un audit par un cabinet ou un cryptographe indépendant. Tout
 a été fait par des outils et des relecteurs automatiques, sans humain
@@ -42,10 +51,11 @@ corrigés, ou acceptés en connaissance de cause et expliqués. Après
 correction, 67 tests Go et 18 vérifications de bout en bout dans le labo
 passent, sous le détecteur d'accès concurrents de Go.
 
-## Relancer les preuves
+<a name="relancer-les-preuves"></a>
+<img src="sections/audit/s02.png" alt="02 Relancer les preuves" width="100%">
 
 ```bash
-go test -race ./...                                        # 71 tests, dont ceux de l'audit
+go test -race ./...                                        # 79 tests, dont ceux des audits
 go test -run '^$' -fuzz=FuzzRecevoir -fuzztime=3m ./internal/tunnel
 go test -run '^$' -fuzz=FuzzLireMessage1 -fuzztime=3m ./internal/noise
 bash scripts/sas.sh essai                                  # 18 vérifications dans le labo
@@ -54,7 +64,8 @@ bash scripts/sas.sh essai                                  # 18 vérifications d
 Les outils du deuxième audit se relancent de la même façon, chacun dans son
 conteneur : voir la section « Deuxième audit ».
 
-## Protocole et cryptographie
+<a name="protocole-et-cryptographie"></a>
+<img src="sections/audit/s03.png" alt="03 Protocole et cryptographie" width="100%">
 
 Le relecteur juge sains, après vérification : l'assemblage Noise IK
 (ordre des jetons, HKDF, nonces, Split), l'absence de réutilisation de nonce,
@@ -164,7 +175,8 @@ Ses constats :
   reste liée à la clé. Accepté.
 - **Documentation en retard sur le code** : mise à jour.
 
-## Serveur
+<a name="serveur"></a>
+<img src="sections/audit/s04.png" alt="04 Serveur" width="100%">
 
 Le relecteur juge sains : l'absence d'injection SQL (requêtes paramétrées)
 et nftables (seulement des adresses et des entiers), les jetons (256 bits,
@@ -276,7 +288,8 @@ faibles de X25519, et la politique elle-même. Ses constats :
 - **Nom et système** d'un appareil : bornés, et sans caractère de contrôle.
 - **API** : délais de lecture et d'écriture.
 
-## Clients et déploiement
+<a name="clients-et-deploiement"></a>
+<img src="sections/audit/s05.png" alt="05 Clients et déploiement" width="100%">
 
 Le relecteur juge sains : Nginx qui coupe les noms inconnus, le refus des
 redirections vers un autre domaine, oauth2-proxy tombé qui refuse au lieu de
@@ -394,7 +407,8 @@ laisser passer, et l'absence de secret dans l'historique git. Ses constats :
   - texte du serveur nettoyé avant affichage ;
   - `ip` appelé par son chemin absolu.
 
-## Revue de sécurité des corrections
+<a name="revue-des-corrections"></a>
+<img src="sections/audit/s06.png" alt="06 Revue des corrections" width="100%">
 
 Une revue de sécurité a relu toutes les corrections, et un vérificateur
 indépendant a contrôlé chacun de ses constats.
@@ -421,7 +435,8 @@ indépendant a contrôlé chacun de ses constats.
   locale du serveur.
 - Corrigé quand même, par le même décodeur canonique.
 
-## Trouvé pendant les corrections
+<a name="trouve-en-corrigeant"></a>
+<img src="sections/audit/s07.png" alt="07 Trouvé en corrigeant" width="100%">
 
 - **Un client réinscrit gardait son ancienne adresse** sur l'interface, en plus
   de la nouvelle, et continuait d'émettre avec. Les pairs rejetaient ces
@@ -433,7 +448,8 @@ indépendant a contrôlé chacun de ses constats.
   impossible. Corrigé : seules les preuves d'inscriptions réussies sont
   retenues.
 
-## Deuxième audit : les outils du métier
+<a name="deuxieme-audit"></a>
+<img src="sections/audit/s08.png" alt="08 Deuxième audit : les outils" width="100%">
 
 Le premier audit reposait sur des relecteurs. Le second passe tout le dépôt
 aux outils qu'emploient les équipes de sécurité, chacun lancé dans un
@@ -568,8 +584,90 @@ une panique ni un désaccord** :
 - décodeur base64 : 38,6 millions ;
 - politique : 21,2 millions.
 
-## Ce qui reste
+<a name="troisieme-audit"></a>
+<img src="sections/audit/s09.png" alt="09 Troisième audit : l'appli" width="100%">
 
+Deux jours après les deux premiers, l'appli Android a pris le vrai tunnel, puis les pouvoirs de l'admin : signer une demande, refuser, inviter, renommer, retirer, révoquer, avec la clé du verrou rangée dans la puce du téléphone. Environ 10 000 lignes que personne n'avait relues. Le 26 septembre 2026, trois relecteurs indépendants ont repris la même méthode, chacun sur un périmètre :
+
+- le serveur et ses nouvelles routes (`internal/serveur/admin.go`, la base, le pont Go) ;
+- l'Android natif : le manifeste, le coffre du verrou (`Coffre.kt`), le service VPN, le verrou de l'appli ;
+- la frontière entre l'appli et le moteur : ce que le téléphone signe, le lien d'invitation, les révocations.
+
+**Résultat** : 23 constats, dont 1 haut et 5 moyens. 22 sont corrigés, un est accepté et expliqué. Les tests Go passent de 73 à 79, plus 8 cibles de fuzzing, sous le détecteur d’accès concurrents.
+
+### A1. Révoquer depuis l'appli signait une liste que le serveur avait choisie
+
+- **Gravité** : haute. Prouvé par deux relecteurs, chacun avec un faux serveur.
+- **Le problème** : pour révoquer un appareil, l'appli partait de la liste servie par le serveur, sans en vérifier la signature, puis signait le tout avec la clé du verrou. Un serveur piraté pouvait y glisser les clés d'appareils légitimes, qui se retrouvaient bannis pour de bon, signés par l'admin lui-même. Il pouvait aussi servir la version maximale : la suivante repassait à zéro, et plus aucune révocation n'était possible sans changer de verrou. `sas verrou revoquer` avait le même défaut.
+- **Correction** : `client.AllongerRevocations` part de ce que l'admin sait sûr (la liste qu'il a retenue) et n'y ajoute la liste servie que si sa signature par le verrou est juste. Une version au plafond est refusée, jamais repassée à zéro. La ligne de commande refuse une liste actuelle mal signée, et affiche toute la liste qu'elle signe.
+- **Tests** : `TestRevoquerIgnoreUneListeForgee`, `TestAllongerRevocationsPlafond`.
+
+### A2. L'admin signait des champs qu'il n'avait jamais vus
+
+- **Gravité** : moyenne, haute dans le modèle du verrou. Prouvé.
+- **Le problème** : l'écran des demandes montrait le nom et l'empreinte. Au moment de signer, l'appli relisait le serveur et signait l'adresse, le groupe et le propriétaire de cette seconde lecture. La clé était la bonne, mais un serveur piraté pouvait faire signer `groupe admins` ou l'adresse de la maison au portable d'un membre. C'était la signature à l'aveugle du constat C1, revenue par l'appli.
+- **Correction** : la carte de demande affiche ce qui sera signé (adresse, groupe, propriétaire, 90 jours). L'appli renvoie au moteur les fiches exactes qu'elle a montrées ; il relit le serveur et refuse si un seul champ diffère. L'adresse doit être dans le réseau retenu, ni celle du serveur, ni celle d'un autre appareil signé.
+- **Tests** : `TestSignerCeQuiEstMontre`, `TestSignerAdresse`.
+
+### A3. Un appareil jamais signé avait les pouvoirs d'admin
+
+- **Gravité** : moyenne. Prouvé.
+- **Le problème** : les routes d'admin ne regardaient que le compte Google du propriétaire. Un compte d'admin volé inscrivait un appareil qui, sans aucun certificat, pouvait lister le réseau, retirer des appareils et créer des invitations. Le modèle de menace disait le contraire.
+- **Correction** : avec un verrou, il faut en plus un certificat en cours de validité, signé pour le groupe `admins`.
+- **Test** : `TestRoutesAdmin`.
+
+### A4. La clé de l'appareil partait dans les sauvegardes
+
+- **Gravité** : moyenne.
+- **Le problème** : rien n'excluait `etat.json`, qui contient la clé privée X25519 de l'appareil, de la sauvegarde Google ni du transfert d'un téléphone à l'autre. Deux téléphones pouvaient se retrouver avec la même identité.
+- **Correction** : `allowBackup="false"`, et des règles d'extraction qui excluent le dossier du moteur, en sauvegarde comme en transfert.
+
+### A5. L'empreinte n'était pas liée à la signature
+
+- **Gravité** : moyenne.
+- **Le problème** : la clé du coffre restait utilisable dix secondes après n'importe quelle authentification biométrique, y compris le déverrouillage du téléphone. L'empreinte demandée par l'appli n'était qu'une barrière de l'interface.
+- **Correction** : une empreinte par opération, avec l'invite native d'Android liée au chiffreur du coffre (`CryptoObject`), en biométrie forte seulement. Ranger une nouvelle clé ne détruit plus l'ancienne avant d'avoir réussi ; une empreinte ajoutée au téléphone vide le coffre avec un message clair.
+
+### A6. Un lien d'invitation forgé pouvait router tout l'Internet du téléphone
+
+- **Gravité** : moyenne à basse. Prouvé.
+- **Le problème** : le serveur choisissait seul le réseau routé dans le tunnel et le domaine de recherche. Un faux serveur répondait `0.0.0.0/0` : tout le trafic IPv4 du téléphone partait chez lui.
+- **Correction** : une plage privée seulement, pas plus large qu'un /16, et un domaine sous `.internal`.
+- **Test** : `TestReseauAcceptable`.
+
+### A7 à A17. Les constats bas
+
+- **A7. Écriture de `revocations.json`** : deux envois simultanés pouvaient faire reculer la liste ou mêler leurs octets. Écriture désormais exclusive, dans un fichier temporaire propre, synchronisée avant le renommage. Test : `TestRevocationsSimultanees`.
+- **A8. Un crash sous Android 9 et 10** : le coffre utilisait une fonction d'Android 11. L'appli demande désormais Android 11 au moins.
+- **A9. Le verrou de l'appli se contournait en reculant l'horloge** : le délai de grâce se compte maintenant sur l'horloge du système, qui ne recule pas.
+- **A10. L'aperçu des applis récentes montrait l'appli déverrouillée** : il est masqué tant que le verrou de l'appli est actif, et un voile couvre l'appli dès qu'elle passe en arrière-plan.
+- **A11. Le clavier atteignait les boutons sous le verrou** : le focus y est exclu, et le retour est bloqué tant que l'écran est verrouillé.
+- **A12. La clé du verrou restait dans le presse-papiers** si l'import était annulé : il est vidé quoi qu'il arrive.
+- **A13. Retirer et révoquer ne montraient que le nom**, que le serveur choisit : le dialogue et l'invite affichent aussi l'empreinte et l'adresse.
+- **A14. Quitter pendant une synchronisation** pouvait réécrire `etat.json` juste après son effacement : `Quitter` attend la fin réelle du moteur, efface un fichier illisible, et une panique du moteur devient une erreur affichée au lieu de tuer l'appli.
+- **A15. Les invitations** : les clés expirées n'étaient jamais purgées. Ménage à chaque création, et 50 clés vivantes au plus.
+- **A16. Le lien d'invitation** : un lien sans clé du verrou ou avec une autorité de certification personnalisée est maintenant signalé clairement à l'écran de connexion.
+- **A17. Nginx coupait à 16 Ko** ce que sasd accepte jusqu'à 256 Ko : les routes des certificats et des révocations montent à 256 Ko.
+
+### Informations traitées
+
+- **La clé du verrou en mémoire** : elle est manipulée en tableaux d'octets remis à zéro. Les copies en chaîne de caractères, imposées par le canal Flutter et par gomobile, ne peuvent pas être effacées : c'est écrit dans le code et dans [`verrou.md`](verrou.md).
+- **Une publication sans clé de signature** était signée en silence avec la clé de débogage : la construction échoue désormais.
+- **Un second démarrage du tunnel** pendant l'autorisation VPN laissait le premier appel sans réponse ; **quitter** pouvait laisser le coffre en place si le moteur échouait ; **signer une liste vide** rendait 0 sans erreur. Corrigés tous trois.
+
+### Accepté et expliqué
+
+- **A18. La clé privée de l'appareil est en clair dans son dossier.** Elle n'est enveloppée par aucune clé de la puce. Elle reste protégée par le bac à sable d'Android, le chiffrement du stockage et des droits réservés à l'appli, et elle ne part plus dans aucune sauvegarde (A4). L'envelopper demande de changer le format de stockage partagé avec le client Linux : c'est noté pour plus tard.
+
+### Vérifié et trouvé sain
+
+Le service VPN n'est joignable que par le système ; le lien `cybersas://` n'est traité que sur l'écran de connexion et demande un appui ; les canaux entre Flutter et Kotlin ne sont joignables que depuis l'appli ; aucun journal ne contient de clé, de jeton ni de graine ; le client refuse `http://`, ne suit aucune redirection et ne fait confiance qu'aux racines du système ; l'empreinte affichée et la clé signée viennent de la même chaîne, décodée de façon canonique ; les invitations sont consommées une seule fois, de façon atomique ; les routes d'admin refusent un non-admin (403) et relisent l'équipe à chaque requête.
+
+<a name="ce-qui-reste"></a>
+<img src="sections/audit/s10.png" alt="10 Ce qui reste" width="100%">
+
+- **La clé privée de chaque appareil** n'est pas enveloppée par la puce du téléphone (constat A18) : protégée par Android, exclue des sauvegardes.
+- **La clé du verrou n'a pas de secours** : perdre le téléphone de l'admin sans copie hors ligne gèle toute signature.
 - **Aucun audit humain.** C'est la prochaine étape sérieuse avant de confier au
   VPN des données dont la fuite serait grave.
 - **Les métadonnées** : le serveur voit qui parle à qui, quand et combien.
@@ -586,3 +684,9 @@ une panique ni un désaccord** :
   conséquence de sécurité, puisque la liste des domaines permis tient.
 - **Pas de liaison directe** entre appareils, et **IPv4 seulement** dans le
   tunnel.
+
+<br>
+
+<div align="center">
+<sub><a href="../README.md">Retour au README</a> · <a href="protocole.md">Le protocole</a> · <a href="verrou.md">Le verrou</a> · <a href="menaces.md">Le modèle de menace</a></sub>
+</div>

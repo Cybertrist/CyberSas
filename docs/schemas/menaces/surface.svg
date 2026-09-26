@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 676" width="1280" height="676" role="img" aria-label="La surface d'attaque. Quelqu'un sur Internet scanne. Sur le VPS, seul point public : le port UDP 51820 du tunnel reste muet sans mac1 valide ; le port TCP 443 ne sert que vpn., auth. et maison., tout autre nom est coupé avant l'échange de certificat ; le port TCP 80 ne fait que rediriger vers 443. À la maison, aucun port ouvert : rien n'écoute. L'API de sasd n'écoute que sur 127.0.0.1, derrière Nginx.">
+<title>La surface d'attaque. Quelqu'un sur Internet scanne. Sur le VPS, seul point public : le port UDP 51820 du tunnel reste muet sans mac1 valide ; le port TCP 443 ne sert que vpn., auth. et maison., tout autre nom est coupé avant l'échange de certificat ; le port TCP 80 ne fait que rediriger vers 443. À la maison, aucun port ouvert : rien n'écoute. L'API de sasd n'écoute que sur 127.0.0.1, derrière Nginx.</title>
+<defs>
+  <filter id="halo" x="-50%" y="-50%" width="200%" height="200%">
+    <feGaussianBlur stdDeviation="6" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="doux" x="-50%" y="-50%" width="200%" height="200%">
+    <feGaussianBlur stdDeviation="3" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="flou" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>
+  <pattern id="grille" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M40 0H0V40" fill="none" stroke="#31E7FD" stroke-opacity="0.05"/>
+  </pattern>
+  <radialGradient id="lueur" cx="50%" cy="0%" r="80%">
+    <stop offset="0" stop-color="#31E7FD" stop-opacity="0.10"/><stop offset="1" stop-color="#31E7FD" stop-opacity="0"/>
+  </radialGradient>
+  <marker id="pCYAN" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#31E7FD"/></marker>
+  <marker id="pBLEU" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#01B9FD"/></marker>
+  <marker id="pVERT" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#3DDC97"/></marker>
+  <marker id="pROUGE" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#FF5C63"/></marker>
+  <marker id="pFIL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#2F3A47"/></marker>
+  <marker id="pDISCRET" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.8 L9.2 5 L0 9.2 Z" fill="#5C6A7A"/></marker>
+</defs>
+<rect width="1280" height="676" rx="16" fill="#0D1117"/>
+<rect width="1280" height="676" rx="16" fill="url(#grille)"/>
+<rect width="1280" height="676" rx="16" fill="url(#lueur)"/>
+
+<text x="640" y="56" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" fill="#31E7FD" text-anchor="middle" letter-spacing="3" >CE QUI EST EXPOSÉ, ET CE QUI RÉPOND</text><text x="640" y="84" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="15" font-weight="400" fill="#94A3B0" text-anchor="middle" >Un seul point public, le VPS. Un scan n’y trouve presque rien à qui parler.</text>
+<rect x="420" y="140" width="440" height="400" rx="18" fill="#01B9FD" fill-opacity="0.03" stroke="#01B9FD" stroke-opacity="0.55" stroke-dasharray="3 6"/>
+<text x="438" y="130" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5" font-weight="400" fill="#01B9FD" text-anchor="start" letter-spacing="2.5" >LE VPS</text><rect x="960" y="200" width="280" height="220" rx="18" fill="#3DDC97" fill-opacity="0.03" stroke="#3DDC97" stroke-opacity="0.55" stroke-dasharray="3 6"/>
+<text x="978" y="190" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5" font-weight="400" fill="#3DDC97" text-anchor="start" letter-spacing="2.5" >LA MAISON</text>
+<g opacity="0.6"><path d="M 300 304 C 375 304 375 213 450 213" fill="none" stroke="#FF5C63" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 7" marker-end="url(#pROUGE)"><animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path><circle cx="300" cy="304" r="3.5" fill="#0D1117" stroke="#FF5C63" stroke-width="2"/></g><g opacity="0.6"><path d="M 300 320 L 450 318" fill="none" stroke="#FF5C63" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 7" marker-end="url(#pROUGE)"><animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path><circle cx="300" cy="320" r="3.5" fill="#0D1117" stroke="#FF5C63" stroke-width="2"/></g><g opacity="0.6"><path d="M 300 336 C 375 336 375 423 450 423" fill="none" stroke="#FF5C63" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 7" marker-end="url(#pROUGE)"><animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path><circle cx="300" cy="336" r="3.5" fill="#0D1117" stroke="#FF5C63" stroke-width="2"/></g>
+<g opacity="0.6"><path d="M 170 360 V 600 H 1100 V 350" fill="none" stroke="#FF5C63" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 7"><animate attributeName="stroke-dashoffset" from="26" to="0" dur="1.2s" repeatCount="indefinite"/></path><circle cx="170" cy="360" r="3.5" fill="#0D1117" stroke="#FF5C63" stroke-width="2"/></g>
+<g>
+  <rect x="40" y="280" width="260" height="80" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  
+  <rect x="40" y="294" width="3" height="52" rx="1.5" fill="#FF5C63"/>
+  <g transform="translate(58,306)"><path d="M6 16 A8 8 0 1 1 22 16 V20 H18 V24 H10 V20 H6 Z" fill="none" stroke="#FF5C63" stroke-width="2" stroke-linejoin="round"/><circle cx="10.5" cy="14" r="2" fill="#FF5C63"/><circle cx="17.5" cy="14" r="2" fill="#FF5C63"/></g>
+  <text x="98" y="317" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >n’importe qui</text>
+  <text x="98" y="337" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >sur Internet, qui scanne</text>
+</g><g>
+  <rect x="450" y="175" width="380" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  
+  <rect x="450" y="189" width="3" height="48" rx="1.5" fill="#01B9FD"/>
+  <g transform="translate(468,199)"><path d="M3 14 H7 L10 6 L14 22 L18 10 L21 14 H25" fill="none" stroke="#01B9FD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <text x="508" y="210" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >UDP 51820</text>
+  <text x="508" y="230" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >muet sans mac1 valide</text>
+</g><g>
+  <rect x="450" y="280" width="380" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  
+  <rect x="450" y="294" width="3" height="48" rx="1.5" fill="#01B9FD"/>
+  <g transform="translate(468,304)"><rect x="3" y="5" width="22" height="18" rx="2" fill="none" stroke="#01B9FD" stroke-width="2"/><path d="M3 11 H25 M3 17 H25 M10 5 V11 M18 11 V17 M10 17 V23" stroke="#01B9FD" stroke-width="2"/></g>
+  <text x="508" y="315" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >TCP 443</text>
+  <text x="508" y="335" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >vpn. auth. maison., le reste coupé</text>
+</g><g>
+  <rect x="450" y="385" width="380" height="76" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  
+  <rect x="450" y="399" width="3" height="48" rx="1.5" fill="#01B9FD"/>
+  <g transform="translate(468,409)"><path d="M12 16 L16 12 M10.5 13.5 L7 17 A4 4 0 0 0 12.7 22.7 L16 19.4 M17.5 14.5 L21 11 A4 4 0 0 0 15.3 5.3 L12 8.6" fill="none" stroke="#01B9FD" stroke-width="2" stroke-linecap="round"/></g>
+  <text x="508" y="420" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >TCP 80</text>
+  <text x="508" y="440" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >redirige vers 443, rien d’autre</text>
+</g><g>
+  <rect x="980" y="270" width="240" height="80" rx="14" fill="#0C1117" stroke="#2A333D"/>
+  
+  <rect x="980" y="284" width="3" height="52" rx="1.5" fill="#3DDC97"/>
+  <g transform="translate(998,296)"><path d="M4 25 V12 L14 4 L24 12 V25 M11 25 V18 H17 V25" fill="none" stroke="#3DDC97" stroke-width="2" stroke-linejoin="round"/></g>
+  <text x="1038" y="307" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5" font-weight="700" fill="#F1F5F9" text-anchor="start" >maison</text>
+  <text x="1038" y="327" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#94A3B0" text-anchor="start" >aucun port ouvert</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.015;0.03;0.13;0.145;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="10" fill="#FF5C63" opacity="0.22"/><circle r="5" fill="#FF5C63"/><animateMotion dur="11s" repeatCount="indefinite" path="M 300 304 C 375 304 375 213 450 213" calcMode="linear" keyTimes="0;0.03;0.13;1" keyPoints="0;0;0.96;0.96"/></g></g><g opacity="0"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.235;0.25;0.35;0.365;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="10" fill="#FF5C63" opacity="0.22"/><circle r="5" fill="#FF5C63"/><animateMotion dur="11s" repeatCount="indefinite" path="M 300 320 L 450 318" calcMode="linear" keyTimes="0;0.25;0.35;1" keyPoints="0;0;0.96;0.96"/></g></g><g opacity="0"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.455;0.47;0.57;0.585;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="10" fill="#FF5C63" opacity="0.22"/><circle r="5" fill="#FF5C63"/><animateMotion dur="11s" repeatCount="indefinite" path="M 300 336 C 375 336 375 423 450 423" calcMode="linear" keyTimes="0;0.47;0.57;1" keyPoints="0;0;0.96;0.96"/></g></g><g opacity="0"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.675;0.69;0.84;0.855;1" values="0;0;1;1;0;0"/><g filter="url(#halo)"><circle r="10" fill="#FF5C63" opacity="0.22"/><circle r="5" fill="#FF5C63"/><animateMotion dur="11s" repeatCount="indefinite" path="M 170 360 V 600 H 1100 V 350" calcMode="linear" keyTimes="0;0.69;0.84;1" keyPoints="0;0;0.93;0.93"/></g></g>
+<g opacity="0"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.11;0.13;0.25;0.27;1" values="0;0;1;1;0;0"/><rect x="684.06" y="159" width="91.88" height="32" rx="9" fill="#1A0D10" stroke="#FF5C63" stroke-opacity="0.6"/><text x="730" y="179.32" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#FF5C63" text-anchor="middle" >… silence</text></g>
+<g opacity="0"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.33;0.35;0.47;0.49;1" values="0;0;1;1;0;0"/><rect x="647.46" y="264" width="165.08" height="32" rx="9" fill="#1A0D10" stroke="#FF5C63" stroke-opacity="0.6"/><text x="730" y="284.32" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#FF5C63" text-anchor="middle" >nom inconnu : coupé</text></g>
+<g opacity="0"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.55;0.57;0.69;0.71;1" values="0;0;1;1;0;0"/><rect x="673.08" y="369" width="113.84" height="32" rx="9" fill="#1A0D10" stroke="#FF5C63" stroke-opacity="0.6"/><text x="730" y="389.32" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#FF5C63" text-anchor="middle" >301 vers 443</text></g>
+<g opacity="0"><animate attributeName="opacity" dur="11s" repeatCount="indefinite" keyTimes="0;0.82;0.84;0.97;0.99;1" values="0;0;1;1;0;0"/><rect x="1039.42" y="374" width="121.16" height="32" rx="9" fill="#1A0D10" stroke="#FF5C63" stroke-opacity="0.6"/><text x="1100" y="394.32" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#FF5C63" text-anchor="middle" >rien n’écoute</text></g>
+<text x="640" y="646" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="13.5" font-weight="400" fill="#94A3B0" text-anchor="middle" >L’API de sasd n’écoute que sur 127.0.0.1 : on ne l’atteint qu’à travers Nginx.</text>
+</svg>

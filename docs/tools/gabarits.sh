@@ -148,7 +148,8 @@ for m in "$@"; do
   for c in "${cs[@]}"; do
     IFS=':' read -r ch n co <<< "$c"
     poids="$n"; [ "$n" = "n" ] && poids=60
-    cases+="<div class=\"f $co\" style=\"flex:$poids 1 0\"><b>$ch</b><i>$n</i></div>"
+    # Une case n'est jamais plus étroite que son nom.
+    cases+="<div class=\"f $co\" style=\"flex:$poids 1 0;min-width:$(( ${#ch} * 8 + 22 ))px\"><b>$ch</b><i>$n</i></div>"
   done
   lignes+="<div class=\"m\"><div class=\"t\"><h3>$ti</h3><span>$taille</span></div><div class=\"r\">$cases</div></div>"
 done

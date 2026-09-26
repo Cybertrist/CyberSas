@@ -29,13 +29,13 @@ HTML
 
 { entete 1280; style; cat <<HTML
 <div class="w" style="grid-template-columns:repeat(4,1fr)">
-$(ecran telephone telephone-connexion 'Rejoindre' 'L’adresse du serveur, la clé du verrou, puis le compte Google.')
+$(ecran telephone telephone-connexion 'Rejoindre' 'Coller le lien d’invitation de l’admin, ou continuer avec Google.')
 $(ecran telephone telephone-accueil 'L’accueil' 'Le tunnel du logo, animé, et l’interrupteur. Ce qui protège l’appareil, en dessous.')
 $(ecran telephone telephone-accueil-eteint 'Tunnel coupé' 'Le logo s’éteint jusqu’à n’être plus qu’un fantôme bleu nuit.')
 $(ecran telephone telephone-appareils 'Les appareils' 'La carte du réseau, qui est en ligne, les demandes à signer.')
-$(ecran telephone telephone-appareils-coupe 'Vu d’ici, tout se grise' 'Le fil du téléphone se vide, le reste du réseau se grise.')
+$(ecran telephone telephone-ajout 'Inviter' 'Un lien à usage unique, à partager au nouvel appareil.')
 $(ecran telephone telephone-detail 'Un appareil' 'Son nom sur le réseau, ses ports, son certificat et l’empreinte de sa clé.')
-$(ecran telephone telephone-demandes 'Les demandes' 'Comparer l’empreinte, puis signer avec le doigt.')
+$(ecran telephone telephone-demandes 'Les demandes' 'L’empreinte, puis ce qui sera signé : adresse, groupe, 90 jours. Le doigt, enfin.')
 $(ecran telephone telephone-reglages 'Les réglages' 'Renommer l’appareil, verrouiller l’appli, masquer l’écran.')
 </div>
 HTML

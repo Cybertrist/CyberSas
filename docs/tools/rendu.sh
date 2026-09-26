@@ -51,3 +51,6 @@ rendre () {
     --force-device-scale-factor=2 --default-background-color=00000000 --screenshot="$sortie" --window-size="$largeur,$H" "$url" >/dev/null 2>&1
   echo "  $(basename "$sortie")  ${largeur}x${H}"
 }
+
+# Les gabarits partagés (bandeaux, grilles, colonnes, bannières, octets).
+source "$D/gabarits.sh"

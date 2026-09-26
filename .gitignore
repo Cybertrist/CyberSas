@@ -9,3 +9,4 @@ docs/tools/html/
 
 # Le moteur compilé : scripts/moteur.sh le refait.
 mobile/android/app/libs/
+docs/tools/controle/

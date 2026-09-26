@@ -31,81 +31,38 @@ function enveloppe(exterieur, { ouverte = false } = {}) {
 }
 
 // ------------------------------------------------------------ 1. le tunnel
-// Les tracés du logo, ceux que l'appli anime sur son accueil
-// (mobile/lib/dessins.dart). Il s'allume couche par couche, les paquets
-// entrent, puis il s'éteint dans l'ordre inverse. L'état, à droite, suit
-// le dessin : un seul mot à la fois, jamais deux qui se chevauchent.
+// Le dessin est celui de l'accueil de l'appli, traduit dans tunnel.js. Ici,
+// le cadre de l'accueil (coins de visée, plage du réseau) et l'état, qui
+// suit l'interrupteur : coupé, connexion, connecté, coupure.
 {
-  const C = 12;
-  const T = {
-    maison: 'M69 205 V98 Q69 86 80 80 L137 50 Q144 46 151 50 L208 80 Q219 86 219 98 V205',
-    arche1: 'M97 200 V137 A47 47 0 0 1 191 137 V200',
-    arche2: 'M124 190 V140 A20 20 0 0 1 164 140 V190',
-    porte: 'M129 160 V141 A15 15 0 0 1 159 141 V160 Z',
-    sol: 'M121 159.5 L167 159.5 L330 250 L330 330 L-42 330 L-42 250 Z',
-    bords: 'M121 159.5 L-42 250 M167 159.5 L330 250',
-    cables: ['M34 252 C62 236 84 222 98 200 L134 160', 'M144 290 L144 160', 'M254 252 C226 236 204 222 190 200 L154 160'],
-  };
-  const couche = (a, b, contenu) =>
-    `<g opacity="0">${fondu('opacity', C, [[0, 0], [a, 0], [a + 0.05, 1], [b, 1], [b + 0.05, 0], [1, 0]])}${contenu}</g>`;
-  const trait = (d, larg, grad) => `<path d="${d}" fill="none" stroke="url(#${grad})" stroke-width="${larg}" stroke-linejoin="round"/>`;
-  const fantome = `<g opacity="0.22">
-    <path d="${T.sol}" fill="#161D24"/>
-    <path d="${T.maison}" fill="none" stroke="#1A3440" stroke-width="16" stroke-linejoin="round"/>
-    <path d="${T.arche1}" fill="none" stroke="#15303B" stroke-width="11"/>
-    <path d="${T.arche2}" fill="none" stroke="#122833" stroke-width="10"/>
-    <path d="${T.porte}" fill="#1D3F4B"/>
-  </g>`;
-  // Le tiret dépasse le tracé de 5 à chaque bout : sinon son bout arrondi
-  // laisse un point lumineux devant la porte, tunnel coupé.
-  const cable = [[0, 105], [0.3, 105], [0.4, 0], [0.8, 0], [0.88, -105], [1, -105]];
-  const cables = T.cables
-    .map((d) => `<path d="${d}" fill="none" stroke="${K.CYAN}" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" filter="url(#flou)" pathLength="100" stroke-dasharray="100 110" stroke-dashoffset="105">${fondu('stroke-dashoffset', C, cable)}</path>
-<path d="${d}" fill="none" stroke="url(#gCable)" stroke-width="3.6" stroke-linecap="round" pathLength="100" stroke-dasharray="100 110" stroke-dashoffset="105">${fondu('stroke-dashoffset', C, cable)}</path>`)
-    .join('\n');
-  // Les paquets n'existent que tunnel ouvert : on les masque d'un bloc.
-  const paquets = T.cables
-    .map((d, i) => `<ellipse rx="10" ry="7.5" fill="#6FF1FF" stroke="#A8F8FF" stroke-width="1.6" filter="url(#halo)">
-    <animateMotion dur="3s" begin="${i}s" repeatCount="indefinite" path="${d}" keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines="0.25 0.1 0.6 1"/>
-    <animateTransform attributeName="transform" type="scale" dur="3s" begin="${i}s" repeatCount="indefinite" values="1.1;0.3" additive="sum"/>
-  </ellipse>`)
-    .join('\n');
-  // Un mot d'état visible de [de] à [a] ; les fondus ne se recouvrent pas.
-  const etat = (mot, couleur, e) => `<g opacity="${e[0][1]}">${fondu('opacity', C, e)}${t(1200, 188, mot, { taille: 26, couleur, poids: 600, ancre: 'end' })}</g>`;
-  const plage = (de, a) => [[0, 0], [de - 0.012, 0], [de, 1], [a, 1], [a + 0.012, 0], [1, 0]];
+  const TN = require('./tunnel');
+  const { C, A, E } = TN;
+  // Le panneau : la zone du tunnel sur l'accueil d'un téléphone.
+  const pl = 372, ph = 384;
+  const x = 640 - pl / 2;
+  const y = 8;
+  const coin = (cx, gauche) => `<path d="M ${cx + (gauche ? 0 : 12)} ${y + 24} V ${y + 12} H ${cx + (gauche ? 12 : 0)}" fill="none" stroke="${K.CYAN}" stroke-opacity="0.5"/>`;
+  const fin = (a) => +a.toFixed(4);
+  const plage = (de, a) => [[0, 0], [fin(de / C), 0], [fin(de / C + 0.004), 1], [fin(a / C), 1], [fin(a / C + 0.004), 0], [1, 0]];
+  const etat = (mot, couleur, e0) => `<g opacity="${e0[0][1]}">${fondu('opacity', C, e0)}${t(1200, 188, mot, { taille: 26, couleur, poids: 600, ancre: 'end' })}</g>`;
+  const allume = A + 2.9;
+  const eteint = E + 3.15;
   const corps = `
-<defs>
-  <linearGradient id="gMaison" x1="0" y1="44" x2="0" y2="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2DEBFF"/><stop offset=".25" stop-color="#18DDFF"/><stop offset=".6" stop-color="#0AA8FF"/><stop offset="1" stop-color="#1FD2FF"/></linearGradient>
-  <linearGradient id="gA1" x1="0" y1="88" x2="0" y2="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1CB9DB"/><stop offset=".5" stop-color="#0E8DB8"/><stop offset="1" stop-color="#0A6C92"/></linearGradient>
-  <linearGradient id="gA2" x1="0" y1="118" x2="0" y2="190" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#127C9E"/><stop offset="1" stop-color="#0A506E"/></linearGradient>
-  <linearGradient id="gPorte" x1="0" y1="126" x2="0" y2="160" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#C4FCFF"/><stop offset="1" stop-color="#7DF0FF"/></linearGradient>
-  <linearGradient id="gSol" x1="0" y1="160" x2="0" y2="300" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0E3446"/><stop offset=".45" stop-color="#08202D"/><stop offset="1" stop-color="#04060A" stop-opacity="0"/></linearGradient>
-  <linearGradient id="gCable" x1="0" y1="160" x2="0" y2="285" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#8FF4FF"/><stop offset=".5" stop-color="#22DDFB"/><stop offset="1" stop-color="#01B9FD" stop-opacity="0.2"/></linearGradient>
-  <radialGradient id="gCiel" cx="144" cy="110" r="150" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0A3246" stop-opacity=".9"/><stop offset=".6" stop-color="#061A26" stop-opacity=".5"/><stop offset="1" stop-color="#04060A" stop-opacity="0"/></radialGradient>
-  <clipPath id="cadre"><rect x="-42" y="-20" width="372" height="330"/></clipPath>
-</defs>
-<g transform="translate(470,34) scale(1.12)" clip-path="url(#cadre)">
-  ${fantome}
-  ${couche(0.02, 0.93, `<ellipse cx="144" cy="120" rx="160" ry="120" fill="url(#gCiel)"/><path d="${T.sol}" fill="url(#gSol)"/><path d="${T.bords}" fill="none" stroke="${K.CYAN}" stroke-opacity="0.3" stroke-width="1.2"/>`)}
-  ${couche(0.07, 0.9, trait(T.arche2, 10, 'gA2'))}
-  ${couche(0.12, 0.87, trait(T.arche1, 11, 'gA1'))}
-  ${couche(0.17, 0.84, `<path d="${T.maison}" fill="none" stroke="${K.CYAN}" stroke-opacity="0.3" stroke-width="22" stroke-linejoin="round" filter="url(#flou)"/>${trait(T.maison, 16, 'gMaison')}`)}
-  ${couche(0.02, 0.93, `<path d="${T.porte}" fill="#5FF0FF" filter="url(#flou)"/><path d="${T.porte}" fill="url(#gPorte)"/>`)}
-  ${cables}
-  ${couche(0.42, 0.76, paquets)}
-</g>
+${TN.tunnel(x, y, pl, ph)}
+${coin(x + 14, true)}${coin(x + pl - 26, false)}
+${t(x + 18, y + 40, '10.77.0.0/24', { taille: 11, couleur: '#A3B1BD', police: MONO, espace: 1.1 })}
 ${t(80, 150, 'LE TUNNEL', { taille: 12, couleur: K.CYAN, police: MONO, espace: 3 })}
 ${t(80, 184, 'Noise IK, puis', { taille: 22, couleur: K.TITRE, poids: 600 })}
 ${t(80, 214, 'ChaCha20-Poly1305', { taille: 22, couleur: K.TITRE, poids: 600 })}
 ${t(80, 248, 'Clés renouvelées toutes les deux minutes,', { taille: 14 })}
 ${t(80, 270, 'rejeu et inondation refusés.', { taille: 14 })}
 ${t(1200, 150, 'ÉTAT', { taille: 12, couleur: K.DISCRET, police: MONO, ancre: 'end', espace: 3 })}
-${etat('Coupé', K.DISCRET, [[0, 1], [0.02, 1], [0.032, 0], [0.974, 0], [0.986, 1], [1, 1]])}
-${etat('Connexion…', K.TEXTE, plage(0.044, 0.39))}
-${etat('Connecté', K.CYAN, plage(0.402, 0.8))}
-${etat('Coupure…', K.TEXTE, plage(0.812, 0.962))}
+${etat('Coupé', K.DISCRET, [[0, 1], [fin(A / C), 1], [fin(A / C + 0.004), 0], [fin(eteint / C), 0], [fin(eteint / C + 0.004), 1], [1, 1]])}
+${etat('Connexion…', K.TEXTE, plage(A, allume))}
+${etat('Connecté', K.CYAN, plage(allume, E))}
+${etat('Coupure…', K.TEXTE, plage(E, eteint))}
 ${t(1200, 218, '10.77.0.18 → 10.77.0.2', { taille: 14, police: MONO, ancre: 'end' })}`;
-  svg('tunnel.svg', 1280, 400, corps, "Le tunnel du logo de CyberSas, animé comme dans l'appli : il s'allume couche par couche, les paquets entrent, puis il s'éteint. À gauche : Noise IK, puis ChaCha20-Poly1305, clés renouvelées toutes les deux minutes. À droite, l'état : coupé, connexion, connecté, coupure.");
+  svg('tunnel.svg', 1280, 400, corps, "Le tunnel du logo de CyberSas, animé exactement comme sur l'accueil de l'appli : coupé, il n'en reste qu'un fantôme bleu nuit ; à l'allumage, le halo, les arches, la maison puis les câbles s'allument l'un après l'autre et les paquets entrent ; à l'extinction, tout s'éteint dans l'ordre inverse. À gauche : Noise IK, puis ChaCha20-Poly1305, clés renouvelées toutes les deux minutes. À droite, l'état : coupé, connexion, connecté, coupure.");
 }
 
 // ------------------------------------------------------------ 2. le relais
@@ -188,8 +145,8 @@ ${bulle(mai, 'DÉCHIFFRÉ, À LA MAISON', [['GET / HTTP/1.1'], ['Host: maison.sa
       const a = 0.03 + i * tranche;
       // Chaque étape existe en fantôme dès la première image, et s'allume
       // à son tour : le schéma se lit à tout instant.
-      const num = t(26, y + 5, String(i + 1).padStart(2, '0'), { taille: 12, couleur: K.DISCRET, police: MONO }) +
-        quand(C, a, fin, t(26, y + 5, String(i + 1).padStart(2, '0'), { taille: 12, couleur: K[couleur], police: MONO }), 0.012);
+      // Chaque étape apparaît à son tour, rien n'est affiché d'avance.
+      const num = quand(C, a, fin, t(26, y + 5, String(i + 1).padStart(2, '0'), { taille: 12, couleur: K[couleur], police: MONO }), 0.012);
       if (de === vers) {
         // Une action sur place : une boîte posée sur la ligne de vie.
         const x = cols[de];
@@ -199,7 +156,7 @@ ${bulle(mai, 'DÉCHIFFRÉ, À LA MAISON', [['GET / HTTP/1.1'], ['Host: maison.sa
         const boiteAction = (bord, encre, opac) => `<rect x="${bx}" y="${y - 17}" width="${l}" height="34" rx="10" fill="${K.CARTE}" stroke="${bord}" stroke-opacity="${opac}"/>
   ${picto(ic.name, bx + 22, y, bord, 0.66)}
   ${t(bx + 42, y + 5, texte, { taille: 13.5, couleur: encre })}`;
-        return num + boiteAction(K.FIL, K.DISCRET, 1) + quand(C, a, fin, boiteAction(K[couleur], K.TITRE, 0.7), 0.012);
+        return num + quand(C, a, fin, boiteAction(K[couleur], K.TITRE, 0.7), 0.012);
       }
       const x1 = cols[de], x2 = cols[vers];
       const sg = Math.sign(x2 - x1);
@@ -209,10 +166,8 @@ ${bulle(mai, 'DÉCHIFFRÉ, À LA MAISON', [['GET / HTTP/1.1'], ['Host: maison.sa
       S.controle(texte, 12.5, MONO, Math.abs(x2 - x1) - 40, `étape ${i + 1}`);
       const etiquette = (encre) => `<rect x="${lx - lp / 2}" y="${y - 29}" width="${lp}" height="22" rx="7" fill="${K.FOND}"/>${t(lx, y - 13, texte, { taille: 12.5, couleur: encre, police: MONO, ancre: 'middle' })}`;
       return num +
-        `<circle cx="${x1}" cy="${y}" r="4" fill="${K.FIL}"/>` +
         quand(C, a, fin, `<circle cx="${x1}" cy="${y}" r="5" fill="${K[couleur]}"/>`, 0.012) +
-        trace_anime(d, C, a, a + tranche * 0.55, fin, { couleur }) +
-        etiquette(K.DISCRET) +
+        trace_anime(d, C, a, a + tranche * 0.55, fin, { couleur, fantome: false }) +
         quand(C, a + tranche * 0.3, fin, etiquette(K.TITRE), 0.012);
     })
     .join('\n');

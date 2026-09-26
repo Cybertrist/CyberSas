@@ -28,7 +28,7 @@ function jetons(C, x, y, liste, de, a, fin, couleur) {
       const c = cx + larg[i] / 2;
       cx += larg[i] + 10;
       const debut = de + ((a - de) * i) / liste.length;
-      return jeton(c, y, s, 'DISCRET') + quand(C, debut, fin, jeton(c, y, s, couleur), 0.012);
+      return quand(C, debut, fin, jeton(c, y, s, couleur), 0.012);
     })
     .join('');
 }
@@ -98,16 +98,15 @@ ${entete(1280, 'LA POIGNÉE DE MAIN : NOISE IK, UN SEUL ALLER-RETOUR', 'Noise_IK
 ${ini}${rep}
 ${t(40, y1 + 5, '1', { taille: 13, couleur: K.DISCRET, police: MONO })}
 ${quand(C, 0.03, fin, `<circle cx="${gx}" cy="${y1}" r="5" fill="${K.CYAN}"/>`, 0.01)}
-${trace_anime(m1, C, 0.03, 0.18, fin, { couleur: 'CYAN' })}
+${trace_anime(m1, C, 0.03, 0.18, fin, { couleur: 'CYAN', fantome: false })}
 ${jetons(C, 640, y1 - 36, ['e', 'es', 's', 'ss', 'horodatage TAI64N'], 0.06, 0.26, fin, 'CYAN')}
-${t(640, y1 + 30, 'initiation · 148 octets · mac1, mac2', { taille: 13, couleur: K.TEXTE, police: MONO, ancre: 'middle' })}
-${pastille(dx, y1 + 62, 'clé inconnue ? pas de réponse', 'DISCRET', { taille: 11.5 })}${quand(C, 0.28, fin, pastille(dx, y1 + 62, 'clé inconnue ? pas de réponse', 'VERT', { taille: 11.5 }), 0.01)}
+${quand(C, 0.2, fin, t(640, y1 + 30, 'initiation · 148 octets · mac1, mac2', { taille: 13, couleur: K.TEXTE, police: MONO, ancre: 'middle' }), 0.01)}
+${quand(C, 0.28, fin, pastille(dx, y1 + 62, 'clé inconnue ? pas de réponse', 'VERT', { taille: 11.5 }), 0.01)}
 ${t(40, y2 + 5, '2', { taille: 13, couleur: K.DISCRET, police: MONO })}
 ${quand(C, 0.38, fin, `<circle cx="${dx}" cy="${y2}" r="5" fill="${K.VERT}"/>`, 0.01)}
-${trace_anime(m2, C, 0.38, 0.53, fin, { couleur: 'VERT' })}
+${trace_anime(m2, C, 0.38, 0.53, fin, { couleur: 'VERT', fantome: false })}
 ${jetons(C, 640, y2 - 36, ['e', 'ee', 'se', 'charge vide'], 0.41, 0.58, fin, 'VERT')}
-${t(640, y2 + 30, 'réponse · 92 octets', { taille: 13, couleur: K.TEXTE, police: MONO, ancre: 'middle' })}
-${pastille(gx, bas - 50, 'clé d’envoi → · clé de réception ←', 'DISCRET', { taille: 12 })}${pastille(dx, bas - 50, '← clé d’envoi · clé de réception →', 'DISCRET', { taille: 12 })}${pastille(640, bas - 50, 'renouvelées toutes les deux minutes', 'DISCRET', { taille: 12 })}
+${quand(C, 0.55, fin, t(640, y2 + 30, 'réponse · 92 octets', { taille: 13, couleur: K.TEXTE, police: MONO, ancre: 'middle' }), 0.01)}
 ${quand(C, 0.64, fin, `${pastille(gx, bas - 50, 'clé d’envoi → · clé de réception ←', 'CYAN', { taille: 12 })}${pastille(dx, bas - 50, '← clé d’envoi · clé de réception →', 'VERT', { taille: 12 })}${pastille(640, bas - 50, 'renouvelées toutes les deux minutes', 'BLEU', { taille: 12 })}`, 0.015)}
 ${t(640, bas + 30, 'e : clé éphémère · s : clé statique, envoyée chiffrée · es, ss, ee, se : échanges X25519 mêlés au hachage', { taille: 13, ancre: 'middle' })}`;
     svg('poignee.svg', 1280, bas + 60, corps, "La poignée de main Noise IK, en un aller-retour. Message 1, de l'initiateur au répondeur : e, es, s, ss et un horodatage TAI64N chiffré, 148 octets avec mac1 et mac2. Le répondeur ne répond pas à une clé inconnue. Message 2, en retour : e, ee, se et une charge vide chiffrée, 92 octets. Chaque côté en tire deux clés de session, une par sens, renouvelées toutes les deux minutes. e est la clé éphémère, s la clé statique envoyée chiffrée ; es, ss, ee et se sont des échanges X25519 mêlés au hachage.");

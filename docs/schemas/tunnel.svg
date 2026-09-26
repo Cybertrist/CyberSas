@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-label="Le tunnel du logo de CyberSas, animé comme dans l'appli : il s'allume couche par couche, les paquets entrent, puis il s'éteint. À gauche : Noise IK, puis ChaCha20-Poly1305, clés renouvelées toutes les deux minutes. À droite, l'état : coupé, connexion, connecté, coupure.">
-<title>Le tunnel du logo de CyberSas, animé comme dans l'appli : il s'allume couche par couche, les paquets entrent, puis il s'éteint. À gauche : Noise IK, puis ChaCha20-Poly1305, clés renouvelées toutes les deux minutes. À droite, l'état : coupé, connexion, connecté, coupure.</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-label="Le tunnel du logo de CyberSas, animé exactement comme sur l'accueil de l'appli : coupé, il n'en reste qu'un fantôme bleu nuit ; à l'allumage, le halo, les arches, la maison puis les câbles s'allument l'un après l'autre et les paquets entrent ; à l'extinction, tout s'éteint dans l'ordre inverse. À gauche : Noise IK, puis ChaCha20-Poly1305, clés renouvelées toutes les deux minutes. À droite, l'état : coupé, connexion, connecté, coupure.">
+<title>Le tunnel du logo de CyberSas, animé exactement comme sur l'accueil de l'appli : coupé, il n'en reste qu'un fantôme bleu nuit ; à l'allumage, le halo, les arches, la maison puis les câbles s'allument l'un après l'autre et les paquets entrent ; à l'extinction, tout s'éteint dans l'ordre inverse. À gauche : Noise IK, puis ChaCha20-Poly1305, clés renouvelées toutes les deux minutes. À droite, l'état : coupé, connexion, connecté, coupure.</title>
 <defs>
   <filter id="halo" x="-50%" y="-50%" width="200%" height="200%">
     <feGaussianBlur stdDeviation="6" result="b"/>
@@ -28,56 +28,110 @@
 <rect width="1280" height="400" rx="16" fill="url(#lueur)"/>
 
 <defs>
-  <linearGradient id="gMaison" x1="0" y1="44" x2="0" y2="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2DEBFF"/><stop offset=".25" stop-color="#18DDFF"/><stop offset=".6" stop-color="#0AA8FF"/><stop offset="1" stop-color="#1FD2FF"/></linearGradient>
-  <linearGradient id="gA1" x1="0" y1="88" x2="0" y2="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1CB9DB"/><stop offset=".5" stop-color="#0E8DB8"/><stop offset="1" stop-color="#0A6C92"/></linearGradient>
-  <linearGradient id="gA2" x1="0" y1="118" x2="0" y2="190" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#127C9E"/><stop offset="1" stop-color="#0A506E"/></linearGradient>
-  <linearGradient id="gPorte" x1="0" y1="126" x2="0" y2="160" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#C4FCFF"/><stop offset="1" stop-color="#7DF0FF"/></linearGradient>
-  <linearGradient id="gSol" x1="0" y1="160" x2="0" y2="300" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0E3446"/><stop offset=".45" stop-color="#08202D"/><stop offset="1" stop-color="#04060A" stop-opacity="0"/></linearGradient>
-  <linearGradient id="gCable" x1="0" y1="160" x2="0" y2="285" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#8FF4FF"/><stop offset=".5" stop-color="#22DDFB"/><stop offset="1" stop-color="#01B9FD" stop-opacity="0.2"/></linearGradient>
-  <radialGradient id="gCiel" cx="144" cy="110" r="150" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0A3246" stop-opacity=".9"/><stop offset=".6" stop-color="#061A26" stop-opacity=".5"/><stop offset="1" stop-color="#04060A" stop-opacity="0"/></radialGradient>
-  <clipPath id="cadre"><rect x="-42" y="-20" width="372" height="330"/></clipPath>
+  <filter id="tFlou8" filterUnits="userSpaceOnUse" x="-120" y="-120" width="560" height="560"><feGaussianBlur stdDeviation="8"/></filter>
+  <filter id="tFlou4" filterUnits="userSpaceOnUse" x="-120" y="-120" width="560" height="560"><feGaussianBlur stdDeviation="4"/></filter>
+  <filter id="tFlou4p" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="4"/></filter>
+  <filter id="tNuit" filterUnits="userSpaceOnUse" x="-120" y="-120" width="560" height="560" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values=".016 .032 .006 0 .012  .038 .075 .014 0 .03  .052 .102 .019 0 .045  0 0 0 1 0"/>
+  </filter>
+  <clipPath id="tDessus"><path d="M-60 -60 H350 V260 L167 159.5 H121 L-60 260 Z"/></clipPath>
+  <clipPath id="tCadre"><rect x="454" y="8" width="372" height="384" rx="18"/></clipPath>
+  <linearGradient id="tGMaison" x1="0" y1="44" x2="0" y2="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2DEBFF" stop-opacity="1"/><stop offset="0.25" stop-color="#18DDFF" stop-opacity="1"/><stop offset="0.6" stop-color="#0AA8FF" stop-opacity="1"/><stop offset="1" stop-color="#1FD2FF" stop-opacity="1"/></linearGradient>
+  <linearGradient id="tGA1" x1="0" y1="88" x2="0" y2="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1CB9DB" stop-opacity="1"/><stop offset="0.5" stop-color="#0E8DB8" stop-opacity="1"/><stop offset="1" stop-color="#0A6C92" stop-opacity="1"/></linearGradient>
+  <linearGradient id="tGA2" x1="0" y1="118" x2="0" y2="190" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#127C9E" stop-opacity="1"/><stop offset="1" stop-color="#0A506E" stop-opacity="1"/></linearGradient>
+  <linearGradient id="tGPorte" x1="0" y1="126" x2="0" y2="160" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#C4FCFF" stop-opacity="1"/><stop offset="1" stop-color="#7DF0FF" stop-opacity="1"/></linearGradient>
+  <linearGradient id="tGCable" x1="0" y1="160" x2="0" y2="285" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#8FF4FF" stop-opacity="1"/><stop offset="0.5" stop-color="#22DDFB" stop-opacity="1"/><stop offset="1" stop-color="#01B9FD" stop-opacity="0"/></linearGradient>
+  <radialGradient id="tLueurSol" cx="144" cy="162" r="90" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#31E7FD" stop-opacity="0.32"/><stop offset="1" stop-color="#31E7FD" stop-opacity="0"/></radialGradient>
+  <radialGradient id="tNoyau" cx="-1" cy="-1.5" r="12" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6FF1FF" stop-opacity="1"/><stop offset="1" stop-color="#14C8EE" stop-opacity="1"/></radialGradient>
 </defs>
-<g transform="translate(470,34) scale(1.12)" clip-path="url(#cadre)">
-  <g opacity="0.22">
-    <path d="M121 159.5 L167 159.5 L330 250 L330 330 L-42 330 L-42 250 Z" fill="#161D24"/>
-    <path d="M69 205 V98 Q69 86 80 80 L137 50 Q144 46 151 50 L208 80 Q219 86 219 98 V205" fill="none" stroke="#1A3440" stroke-width="16" stroke-linejoin="round"/>
-    <path d="M97 200 V137 A47 47 0 0 1 191 137 V200" fill="none" stroke="#15303B" stroke-width="11"/>
-    <path d="M124 190 V140 A20 20 0 0 1 164 140 V190" fill="none" stroke="#122833" stroke-width="10"/>
-    <path d="M129 160 V141 A15 15 0 0 1 159 141 V160 Z" fill="#1D3F4B"/>
+<rect x="454" y="8" width="372" height="384" rx="18" fill="#04060A"/>
+<g clip-path="url(#tCadre)"><g transform="translate(458.2248520710059,8) scale(1.136094674556213)">
+  <g transform="translate(1.6,-8) scale(1.1)">
+    <g opacity="0.4"><defs>
+<radialGradient id="offCiel" cx="144" cy="110" r="150" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0E151C" stop-opacity="0.9"/><stop offset="0.6" stop-color="#0A1016" stop-opacity="0.5"/><stop offset="1" stop-color="#04060A" stop-opacity="0"/></radialGradient>
+<linearGradient id="offAnneau" x1="0" y1="20" x2="0" y2="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#3A4450" stop-opacity="0.32"/><stop offset="0.7" stop-color="#3A4450" stop-opacity="0.12"/><stop offset="1" stop-color="#31E7FD" stop-opacity="0"/></linearGradient>
+<linearGradient id="offSol" x1="0" y1="160" x2="0" y2="300" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#161D24" stop-opacity="1"/><stop offset="0.45" stop-color="#0C1117" stop-opacity="1"/><stop offset="1" stop-color="#04060A" stop-opacity="0"/></linearGradient>
+<linearGradient id="offBords" x1="0" y1="160" x2="0" y2="250" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#3A4450" stop-opacity="0.35"/><stop offset="1" stop-color="#31E7FD" stop-opacity="0"/></linearGradient></defs>
+<ellipse cx="144" cy="120" rx="160" ry="120" fill="url(#offCiel)"/>
+<circle cx="144" cy="152" r="128" fill="none" stroke="url(#offAnneau)" stroke-width="1.3" clip-path="url(#tDessus)"/>
+<g filter="url(#tNuit)"><path d="M69 205 V98 Q69 86 80 80 L137 50 Q144 46 151 50 L208 80 Q219 86 219 98 V205" fill="none" stroke="#31E7FD" stroke-width="22" stroke-linejoin="round" stroke-opacity="0.28" filter="url(#tFlou8)"/><path d="M69 205 V98 Q69 86 80 80 L137 50 Q144 46 151 50 L208 80 Q219 86 219 98 V205" fill="none" stroke="url(#tGMaison)" stroke-width="16" stroke-linejoin="round"/></g>
+<g filter="url(#tNuit)"><path d="M97 200 V137 A47 47 0 0 1 191 137 V200" fill="none" stroke="url(#tGA1)" stroke-width="11" stroke-linejoin="round"/></g>
+<g filter="url(#tNuit)"><path d="M124 190 V140 A20 20 0 0 1 164 140 V190" fill="none" stroke="url(#tGA2)" stroke-width="10" stroke-linejoin="round"/></g>
+<g filter="url(#tNuit)"><path d="M129 160 V141 A15 15 0 0 1 159 141 V160 Z" fill="#5FF0FF" fill-opacity="0.7" filter="url(#tFlou8)"/><path d="M129 160 V141 A15 15 0 0 1 159 141 V160 Z" fill="url(#tGPorte)"/></g>
+<path d="M121 159.5 L167 159.5 L330 250 L330 330 L-42 330 L-42 250 Z" fill="url(#offSol)"/><path d="M121 159.5 L-42 250 M167 159.5 L330 250" fill="none" stroke="url(#offBords)" stroke-width="1.2"/>
+<g filter="url(#tNuit)" opacity="1"><path d="M34 252 C62 236 84 222 98 200 L134 160" fill="none" stroke="#31E7FD" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" filter="url(#tFlou4)"></path>
+<path d="M34 252 C62 236 84 222 98 200 L134 160" fill="none" stroke="url(#tGCable)" stroke-width="3.6" stroke-linecap="round"></path>
+<path d="M144 290 L144 160" fill="none" stroke="#31E7FD" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" filter="url(#tFlou4)"></path>
+<path d="M144 290 L144 160" fill="none" stroke="url(#tGCable)" stroke-width="3.6" stroke-linecap="round"></path>
+<path d="M254 252 C226 236 204 222 190 200 L154 160" fill="none" stroke="#31E7FD" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" filter="url(#tFlou4)"></path>
+<path d="M254 252 C226 236 204 222 190 200 L154 160" fill="none" stroke="url(#tGCable)" stroke-width="3.6" stroke-linecap="round"></path></g></g>
+    <defs>
+<radialGradient id="onCiel" cx="144" cy="110" r="150" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0A3246" stop-opacity="0.9"/><stop offset="0.6" stop-color="#061A26" stop-opacity="0.5"/><stop offset="1" stop-color="#04060A" stop-opacity="0"/></radialGradient>
+<linearGradient id="onAnneau" x1="0" y1="20" x2="0" y2="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#31E7FD" stop-opacity="0.32"/><stop offset="0.7" stop-color="#31E7FD" stop-opacity="0.12"/><stop offset="1" stop-color="#31E7FD" stop-opacity="0"/></linearGradient>
+<linearGradient id="onSol" x1="0" y1="160" x2="0" y2="300" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0E3446" stop-opacity="1"/><stop offset="0.45" stop-color="#08202D" stop-opacity="1"/><stop offset="1" stop-color="#04060A" stop-opacity="0"/></linearGradient>
+<linearGradient id="onBords" x1="0" y1="160" x2="0" y2="250" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#31E7FD" stop-opacity="0.35"/><stop offset="1" stop-color="#31E7FD" stop-opacity="0"/></linearGradient></defs>
+<g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.0938;0.1375;0.7719;0.8219;1" values="0;0;1;1;0;0" keySplines="0 0 1 1;0.25 0.1 0.25 1;0 0 1 1;0.25 0.1 0.25 1;0 0 1 1"/><ellipse cx="144" cy="120" rx="160" ry="120" fill="url(#onCiel)"/>
+<circle cx="144" cy="152" r="128" fill="none" stroke="url(#onAnneau)" stroke-width="1.3" clip-path="url(#tDessus)"/></g>
+<g><g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.1656;0.1906;0.6969;0.725;1" values="0;0;1;1;0;0" keySplines="0 0 1 1;0.25 0.1 0.25 1;0 0 1 1;0.25 0.1 0.25 1;0 0 1 1"/><path d="M69 205 V98 Q69 86 80 80 L137 50 Q144 46 151 50 L208 80 Q219 86 219 98 V205" fill="none" stroke="#31E7FD" stroke-width="22" stroke-linejoin="round" stroke-opacity="0.2" filter="url(#tFlou8)"><animate attributeName="stroke-opacity" dur="3s" repeatCount="indefinite" keyTimes="0;0.5;1" values="0.2;0.38;0.2"/></path><path d="M69 205 V98 Q69 86 80 80 L137 50 Q144 46 151 50 L208 80 Q219 86 219 98 V205" fill="none" stroke="url(#tGMaison)" stroke-width="16" stroke-linejoin="round"/></g></g>
+<g><g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.1437;0.1687;0.7219;0.75;1" values="0;0;1;1;0;0" keySplines="0 0 1 1;0.25 0.1 0.25 1;0 0 1 1;0.25 0.1 0.25 1;0 0 1 1"/><path d="M97 200 V137 A47 47 0 0 1 191 137 V200" fill="none" stroke="url(#tGA1)" stroke-width="11" stroke-linejoin="round"/></g></g>
+<g><g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.1219;0.1469;0.7469;0.775;1" values="0;0;1;1;0;0" keySplines="0 0 1 1;0.25 0.1 0.25 1;0 0 1 1;0.25 0.1 0.25 1;0 0 1 1"/><path d="M124 190 V140 A20 20 0 0 1 164 140 V190" fill="none" stroke="url(#tGA2)" stroke-width="10" stroke-linejoin="round"/></g></g>
+<g><g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.0938;0.1375;0.7719;0.8219;1" values="0;0;1;1;0;0" keySplines="0 0 1 1;0.25 0.1 0.25 1;0 0 1 1;0.25 0.1 0.25 1;0 0 1 1"/><path d="M129 160 V141 A15 15 0 0 1 159 141 V160 Z" fill="#5FF0FF" fill-opacity="0.5" filter="url(#tFlou8)"><animate attributeName="fill-opacity" dur="3s" repeatCount="indefinite" keyTimes="0;0.5;1" values="0.5;0.9;0.5"/></path><path d="M129 160 V141 A15 15 0 0 1 159 141 V160 Z" fill="url(#tGPorte)"/></g></g>
+<g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.0938;0.1375;0.7719;0.8219;1" values="0;0;1;1;0;0" keySplines="0 0 1 1;0.25 0.1 0.25 1;0 0 1 1;0.25 0.1 0.25 1;0 0 1 1"/><path d="M121 159.5 L167 159.5 L330 250 L330 330 L-42 330 L-42 250 Z" fill="url(#onSol)"/><path d="M121 159.5 L167 159.5 L330 250 L330 330 L-42 330 L-42 250 Z" fill="url(#tLueurSol)"/><path d="M121 159.5 L-42 250 M167 159.5 L330 250" fill="none" stroke="url(#onBords)" stroke-width="1.2"/></g>
+<g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" calcMode="discrete" keyTimes="0;0.1875;0.6937" values="0;1;0"/><path d="M34 252 C62 236 84 222 98 200 L134 160" fill="none" stroke="#31E7FD" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" filter="url(#tFlou4)" pathLength="100" stroke-dasharray="100 200" stroke-dashoffset="100"><animate attributeName="stroke-dashoffset" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.1875;0.2562;0.625;0.6937;1" values="100;100;0;0;-100;-100" keySplines="0 0 1 1;0.2 0 0.5 1;0 0 1 1;0.5 0 0.8 1;0 0 1 1"/></path>
+<path d="M34 252 C62 236 84 222 98 200 L134 160" fill="none" stroke="url(#tGCable)" stroke-width="3.6" stroke-linecap="round" pathLength="100" stroke-dasharray="100 200" stroke-dashoffset="100"><animate attributeName="stroke-dashoffset" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.1875;0.2562;0.625;0.6937;1" values="100;100;0;0;-100;-100" keySplines="0 0 1 1;0.2 0 0.5 1;0 0 1 1;0.5 0 0.8 1;0 0 1 1"/></path>
+<path d="M144 290 L144 160" fill="none" stroke="#31E7FD" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" filter="url(#tFlou4)" pathLength="100" stroke-dasharray="100 200" stroke-dashoffset="100"><animate attributeName="stroke-dashoffset" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.1875;0.2562;0.625;0.6937;1" values="100;100;0;0;-100;-100" keySplines="0 0 1 1;0.2 0 0.5 1;0 0 1 1;0.5 0 0.8 1;0 0 1 1"/></path>
+<path d="M144 290 L144 160" fill="none" stroke="url(#tGCable)" stroke-width="3.6" stroke-linecap="round" pathLength="100" stroke-dasharray="100 200" stroke-dashoffset="100"><animate attributeName="stroke-dashoffset" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.1875;0.2562;0.625;0.6937;1" values="100;100;0;0;-100;-100" keySplines="0 0 1 1;0.2 0 0.5 1;0 0 1 1;0.5 0 0.8 1;0 0 1 1"/></path>
+<path d="M254 252 C226 236 204 222 190 200 L154 160" fill="none" stroke="#31E7FD" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" filter="url(#tFlou4)" pathLength="100" stroke-dasharray="100 200" stroke-dashoffset="100"><animate attributeName="stroke-dashoffset" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.1875;0.2562;0.625;0.6937;1" values="100;100;0;0;-100;-100" keySplines="0 0 1 1;0.2 0 0.5 1;0 0 1 1;0.5 0 0.8 1;0 0 1 1"/></path>
+<path d="M254 252 C226 236 204 222 190 200 L154 160" fill="none" stroke="url(#tGCable)" stroke-width="3.6" stroke-linecap="round" pathLength="100" stroke-dasharray="100 200" stroke-dashoffset="100"><animate attributeName="stroke-dashoffset" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.1875;0.2562;0.625;0.6937;1" values="100;100;0;0;-100;-100" keySplines="0 0 1 1;0.2 0 0.5 1;0 0 1 1;0.5 0 0.8 1;0 0 1 1"/></path></g>
+    <g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.25;0.275;0.625;0.6406;1" values="0;0;1;1;0;0" keySplines="0 0 1 1;0.25 0.1 0.25 1;0 0 1 1;0.25 0.1 0.25 1;0 0 1 1"/><g>
+  <animateMotion dur="3s" begin="-0s" repeatCount="indefinite" path="M34 252 C62 236 84 222 98 200 L134 160" calcMode="spline" keyTimes="0;1" keyPoints="0;1" keySplines="0.25 0.1 0.6 1"/>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="3s" begin="-0s" repeatCount="indefinite" keyTimes="0;0.14;0.86;1" values="0;1;1;0"/>
+    <g>
+      <animateTransform attributeName="transform" type="scale" dur="3s" begin="-0s" repeatCount="indefinite" calcMode="spline" keyTimes="0;1" values="1.1;0.3" keySplines="0.25 0.1 0.6 1"/>
+      <ellipse rx="13" ry="10" fill="#31E7FD" fill-opacity="0.35" filter="url(#tFlou4p)"/>
+      <ellipse rx="10" ry="7.5" fill="url(#tNoyau)"/>
+      <ellipse rx="10" ry="7.5" fill="none" stroke="#A8F8FF" stroke-width="1.6"/>
+    </g>
   </g>
-  <g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.02;0.07;0.93;0.98;1" values="0;0;1;1;0;0"/><ellipse cx="144" cy="120" rx="160" ry="120" fill="url(#gCiel)"/><path d="M121 159.5 L167 159.5 L330 250 L330 330 L-42 330 L-42 250 Z" fill="url(#gSol)"/><path d="M121 159.5 L-42 250 M167 159.5 L330 250" fill="none" stroke="#31E7FD" stroke-opacity="0.3" stroke-width="1.2"/></g>
-  <g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.07;0.12;0.9;0.95;1" values="0;0;1;1;0;0"/><path d="M124 190 V140 A20 20 0 0 1 164 140 V190" fill="none" stroke="url(#gA2)" stroke-width="10" stroke-linejoin="round"/></g>
-  <g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.12;0.17;0.87;0.92;1" values="0;0;1;1;0;0"/><path d="M97 200 V137 A47 47 0 0 1 191 137 V200" fill="none" stroke="url(#gA1)" stroke-width="11" stroke-linejoin="round"/></g>
-  <g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.17;0.22;0.84;0.89;1" values="0;0;1;1;0;0"/><path d="M69 205 V98 Q69 86 80 80 L137 50 Q144 46 151 50 L208 80 Q219 86 219 98 V205" fill="none" stroke="#31E7FD" stroke-opacity="0.3" stroke-width="22" stroke-linejoin="round" filter="url(#flou)"/><path d="M69 205 V98 Q69 86 80 80 L137 50 Q144 46 151 50 L208 80 Q219 86 219 98 V205" fill="none" stroke="url(#gMaison)" stroke-width="16" stroke-linejoin="round"/></g>
-  <g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.02;0.07;0.93;0.98;1" values="0;0;1;1;0;0"/><path d="M129 160 V141 A15 15 0 0 1 159 141 V160 Z" fill="#5FF0FF" filter="url(#flou)"/><path d="M129 160 V141 A15 15 0 0 1 159 141 V160 Z" fill="url(#gPorte)"/></g>
-  <path d="M34 252 C62 236 84 222 98 200 L134 160" fill="none" stroke="#31E7FD" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" filter="url(#flou)" pathLength="100" stroke-dasharray="100 110" stroke-dashoffset="105"><animate attributeName="stroke-dashoffset" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.4;0.8;0.88;1" values="105;105;0;0;-105;-105"/></path>
-<path d="M34 252 C62 236 84 222 98 200 L134 160" fill="none" stroke="url(#gCable)" stroke-width="3.6" stroke-linecap="round" pathLength="100" stroke-dasharray="100 110" stroke-dashoffset="105"><animate attributeName="stroke-dashoffset" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.4;0.8;0.88;1" values="105;105;0;0;-105;-105"/></path>
-<path d="M144 290 L144 160" fill="none" stroke="#31E7FD" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" filter="url(#flou)" pathLength="100" stroke-dasharray="100 110" stroke-dashoffset="105"><animate attributeName="stroke-dashoffset" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.4;0.8;0.88;1" values="105;105;0;0;-105;-105"/></path>
-<path d="M144 290 L144 160" fill="none" stroke="url(#gCable)" stroke-width="3.6" stroke-linecap="round" pathLength="100" stroke-dasharray="100 110" stroke-dashoffset="105"><animate attributeName="stroke-dashoffset" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.4;0.8;0.88;1" values="105;105;0;0;-105;-105"/></path>
-<path d="M254 252 C226 236 204 222 190 200 L154 160" fill="none" stroke="#31E7FD" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" filter="url(#flou)" pathLength="100" stroke-dasharray="100 110" stroke-dashoffset="105"><animate attributeName="stroke-dashoffset" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.4;0.8;0.88;1" values="105;105;0;0;-105;-105"/></path>
-<path d="M254 252 C226 236 204 222 190 200 L154 160" fill="none" stroke="url(#gCable)" stroke-width="3.6" stroke-linecap="round" pathLength="100" stroke-dasharray="100 110" stroke-dashoffset="105"><animate attributeName="stroke-dashoffset" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.4;0.8;0.88;1" values="105;105;0;0;-105;-105"/></path>
-  <g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.42;0.47;0.76;0.81;1" values="0;0;1;1;0;0"/><ellipse rx="10" ry="7.5" fill="#6FF1FF" stroke="#A8F8FF" stroke-width="1.6" filter="url(#halo)">
-    <animateMotion dur="3s" begin="0s" repeatCount="indefinite" path="M34 252 C62 236 84 222 98 200 L134 160" keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines="0.25 0.1 0.6 1"/>
-    <animateTransform attributeName="transform" type="scale" dur="3s" begin="0s" repeatCount="indefinite" values="1.1;0.3" additive="sum"/>
-  </ellipse>
-<ellipse rx="10" ry="7.5" fill="#6FF1FF" stroke="#A8F8FF" stroke-width="1.6" filter="url(#halo)">
-    <animateMotion dur="3s" begin="1s" repeatCount="indefinite" path="M144 290 L144 160" keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines="0.25 0.1 0.6 1"/>
-    <animateTransform attributeName="transform" type="scale" dur="3s" begin="1s" repeatCount="indefinite" values="1.1;0.3" additive="sum"/>
-  </ellipse>
-<ellipse rx="10" ry="7.5" fill="#6FF1FF" stroke="#A8F8FF" stroke-width="1.6" filter="url(#halo)">
-    <animateMotion dur="3s" begin="2s" repeatCount="indefinite" path="M254 252 C226 236 204 222 190 200 L154 160" keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines="0.25 0.1 0.6 1"/>
-    <animateTransform attributeName="transform" type="scale" dur="3s" begin="2s" repeatCount="indefinite" values="1.1;0.3" additive="sum"/>
-  </ellipse></g>
 </g>
+<g>
+  <animateMotion dur="3s" begin="-1s" repeatCount="indefinite" path="M144 290 L144 160" calcMode="spline" keyTimes="0;1" keyPoints="0;1" keySplines="0.25 0.1 0.6 1"/>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="3s" begin="-1s" repeatCount="indefinite" keyTimes="0;0.14;0.86;1" values="0;1;1;0"/>
+    <g>
+      <animateTransform attributeName="transform" type="scale" dur="3s" begin="-1s" repeatCount="indefinite" calcMode="spline" keyTimes="0;1" values="1.1;0.3" keySplines="0.25 0.1 0.6 1"/>
+      <ellipse rx="13" ry="10" fill="#31E7FD" fill-opacity="0.35" filter="url(#tFlou4p)"/>
+      <ellipse rx="10" ry="7.5" fill="url(#tNoyau)"/>
+      <ellipse rx="10" ry="7.5" fill="none" stroke="#A8F8FF" stroke-width="1.6"/>
+    </g>
+  </g>
+</g>
+<g>
+  <animateMotion dur="3s" begin="-2s" repeatCount="indefinite" path="M254 252 C226 236 204 222 190 200 L154 160" calcMode="spline" keyTimes="0;1" keyPoints="0;1" keySplines="0.25 0.1 0.6 1"/>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="3s" begin="-2s" repeatCount="indefinite" keyTimes="0;0.14;0.86;1" values="0;1;1;0"/>
+    <g>
+      <animateTransform attributeName="transform" type="scale" dur="3s" begin="-2s" repeatCount="indefinite" calcMode="spline" keyTimes="0;1" values="1.1;0.3" keySplines="0.25 0.1 0.6 1"/>
+      <ellipse rx="13" ry="10" fill="#31E7FD" fill-opacity="0.35" filter="url(#tFlou4p)"/>
+      <ellipse rx="10" ry="7.5" fill="url(#tNoyau)"/>
+      <ellipse rx="10" ry="7.5" fill="none" stroke="#A8F8FF" stroke-width="1.6"/>
+    </g>
+  </g>
+</g></g>
+  </g>
+</g></g>
+<path d="M 468 32 V 20 H 480" fill="none" stroke="#31E7FD" stroke-opacity="0.5"/><path d="M 812 32 V 20 H 800" fill="none" stroke="#31E7FD" stroke-opacity="0.5"/>
+<text x="472" y="48" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" font-weight="400" fill="#A3B1BD" text-anchor="start" letter-spacing="1.1" >10.77.0.0/24</text>
 <text x="80" y="150" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#31E7FD" text-anchor="start" letter-spacing="3" >LE TUNNEL</text>
 <text x="80" y="184" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="600" fill="#F1F5F9" text-anchor="start" >Noise IK, puis</text>
 <text x="80" y="214" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="600" fill="#F1F5F9" text-anchor="start" >ChaCha20-Poly1305</text>
 <text x="80" y="248" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="14" font-weight="400" fill="#94A3B0" text-anchor="start" >Clés renouvelées toutes les deux minutes,</text>
 <text x="80" y="270" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="14" font-weight="400" fill="#94A3B0" text-anchor="start" >rejeu et inondation refusés.</text>
 <text x="1200" y="150" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="400" fill="#5C6A7A" text-anchor="end" letter-spacing="3" >ÉTAT</text>
-<g opacity="1"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.02;0.032;0.974;0.986;1" values="1;1;0;0;1;1"/><text x="1200" y="188" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="600" fill="#5C6A7A" text-anchor="end" >Coupé</text></g>
-<g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.032;0.044;0.39;0.402;1" values="0;0;1;1;0;0"/><text x="1200" y="188" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="600" fill="#94A3B0" text-anchor="end" >Connexion…</text></g>
-<g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.39;0.402;0.8;0.812;1" values="0;0;1;1;0;0"/><text x="1200" y="188" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="600" fill="#31E7FD" text-anchor="end" >Connecté</text></g>
-<g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.8;0.812;0.962;0.974;1" values="0;0;1;1;0;0"/><text x="1200" y="188" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="600" fill="#94A3B0" text-anchor="end" >Coupure…</text></g>
+<g opacity="1"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" keyTimes="0;0.094;0.098;0.822;0.826;1" values="1;1;0;0;1;1"/><text x="1200" y="188" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="600" fill="#5C6A7A" text-anchor="end" >Coupé</text></g>
+<g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" keyTimes="0;0.094;0.098;0.275;0.279;1" values="0;0;1;1;0;0"/><text x="1200" y="188" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="600" fill="#94A3B0" text-anchor="end" >Connexion…</text></g>
+<g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" keyTimes="0;0.275;0.279;0.625;0.629;1" values="0;0;1;1;0;0"/><text x="1200" y="188" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="600" fill="#31E7FD" text-anchor="end" >Connecté</text></g>
+<g opacity="0"><animate attributeName="opacity" dur="16s" repeatCount="indefinite" keyTimes="0;0.625;0.629;0.822;0.826;1" values="0;0;1;1;0;0"/><text x="1200" y="188" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="600" fill="#94A3B0" text-anchor="end" >Coupure…</text></g>
 <text x="1200" y="218" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" font-weight="400" fill="#94A3B0" text-anchor="end" >10.77.0.18 → 10.77.0.2</text>
 </svg>

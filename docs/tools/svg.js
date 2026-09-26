@@ -195,7 +195,7 @@ function fil(d, { couleur = 'FIL', pointe = false, court = true, plein = false, 
 }
 
 /// Un fil qui se trace de [de] à [a], reste, puis s'efface en [fin].
-function trace_anime(d, cycle, de, a, fin, { couleur = 'CYAN', epaisseur = 2.4, pointe = true, halo = true } = {}) {
+function trace_anime(d, cycle, de, a, fin, { couleur = 'CYAN', epaisseur = 2.4, pointe = true, halo = true, fantome: avecFantome = true } = {}) {
   const c = K[couleur] || couleur;
   const off = fondu('stroke-dashoffset', cycle, [[0, 100], [de, 100], [a, 0], [1, 0]]);
   // Pas de filtre sur un trait : une ligne droite a une boîte de hauteur
@@ -207,7 +207,7 @@ function trace_anime(d, cycle, de, a, fin, { couleur = 'CYAN', epaisseur = 2.4, 
   // La pointe n'arrive qu'avec le trait : posée sur le tracé entier dès le
   // début, elle attendrait seule au bout.
   const bout = pointe ? quand(cycle, a - 0.005, fin, `<path d="${d}" fill="none" stroke="${c}" stroke-opacity="0" stroke-width="${epaisseur}" marker-end="url(#p${couleur})"/>`, 0.005) : '';
-  return fantome + quand(cycle, de, fin, `${lueur}<path d="${d}" fill="none" stroke="${c}" stroke-width="${epaisseur}" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100">${off}</path>`, 0.01) + bout;
+  return (avecFantome ? fantome : '') + quand(cycle, de, fin, `${lueur}<path d="${d}" fill="none" stroke="${c}" stroke-width="${epaisseur}" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100">${off}</path>`, 0.01) + bout;
 }
 
 /// Une bille lumineuse qui suit un tracé quelconque. [etapes] : couples

@@ -28,7 +28,7 @@ function jetons(C, x, y, liste, de, a, fin, couleur) {
       const c = cx + larg[i] / 2;
       cx += larg[i] + 10;
       const debut = de + ((a - de) * i) / liste.length;
-      return quand(C, debut, fin, jeton(c, y, s, couleur), 0.012);
+      return jeton(c, y, s, 'DISCRET') + quand(C, debut, fin, jeton(c, y, s, couleur), 0.012);
     })
     .join('');
 }
@@ -42,12 +42,12 @@ function jetons(C, x, y, liste, de, a, fin, couleur) {
   // de bout en bout, qui traverse le serveur sans s'ouvrir.
   {
     const C = 8;
-    const y = 150, h = 140;
-    const a = carte(40, y, 250, h, 'fold8-tristan', 'appareil A', K.CYAN, { icone: P.telephone });
-    const s = carte(515, y, 250, h, 'sasd', 'le serveur', K.BLEU, { icone: P.serveur });
-    const b = carte(990, y, 250, h, 'maison', 'appareil B', K.VERT, { icone: P.maison });
+    const y = 150, h = 150;
+    const a = carte(40, y, 250, h, 'fold8-tristan', 'appareil A', K.CYAN, { icone: P.telephone, enHaut: true });
+    const s = carte(515, y, 250, h, 'sasd', 'le serveur', K.BLEU, { icone: P.serveur, enHaut: true });
+    const b = carte(990, y, 250, h, 'maison', 'appareil B', K.VERT, { icone: P.maison, enHaut: true });
     // Le texte des cartes est en haut : on le remonte en les redessinant.
-    const yt = y + h - 38; // l'axe des tuyaux
+    const yt = y + h - 36; // l'axe des tuyaux, sous le texte des cartes
     const tuyau = (x1, x2, hauteur, couleur, remplissage) =>
       `<rect x="${x1}" y="${yt - hauteur / 2}" width="${x2 - x1}" height="${hauteur}" rx="${hauteur / 2}" fill="${couleur}" fill-opacity="${remplissage}" stroke="${couleur}" stroke-opacity="0.75" stroke-width="1.6"/>`;
     const paquet = (debut) => [
@@ -100,13 +100,14 @@ ${t(40, y1 + 5, '1', { taille: 13, couleur: K.DISCRET, police: MONO })}
 ${quand(C, 0.03, fin, `<circle cx="${gx}" cy="${y1}" r="5" fill="${K.CYAN}"/>`, 0.01)}
 ${trace_anime(m1, C, 0.03, 0.18, fin, { couleur: 'CYAN' })}
 ${jetons(C, 640, y1 - 36, ['e', 'es', 's', 'ss', 'horodatage TAI64N'], 0.06, 0.26, fin, 'CYAN')}
-${quand(C, 0.2, fin, t(640, y1 + 30, 'initiation · 148 octets · mac1, mac2', { taille: 13, couleur: K.TEXTE, police: MONO, ancre: 'middle' }), 0.01)}
-${quand(C, 0.28, fin, pastille(dx, y1 + 62, 'clé inconnue ? pas de réponse', 'VERT', { taille: 11.5 }), 0.01)}
+${t(640, y1 + 30, 'initiation · 148 octets · mac1, mac2', { taille: 13, couleur: K.TEXTE, police: MONO, ancre: 'middle' })}
+${pastille(dx, y1 + 62, 'clé inconnue ? pas de réponse', 'DISCRET', { taille: 11.5 })}${quand(C, 0.28, fin, pastille(dx, y1 + 62, 'clé inconnue ? pas de réponse', 'VERT', { taille: 11.5 }), 0.01)}
 ${t(40, y2 + 5, '2', { taille: 13, couleur: K.DISCRET, police: MONO })}
 ${quand(C, 0.38, fin, `<circle cx="${dx}" cy="${y2}" r="5" fill="${K.VERT}"/>`, 0.01)}
 ${trace_anime(m2, C, 0.38, 0.53, fin, { couleur: 'VERT' })}
 ${jetons(C, 640, y2 - 36, ['e', 'ee', 'se', 'charge vide'], 0.41, 0.58, fin, 'VERT')}
-${quand(C, 0.55, fin, t(640, y2 + 30, 'réponse · 92 octets', { taille: 13, couleur: K.TEXTE, police: MONO, ancre: 'middle' }), 0.01)}
+${t(640, y2 + 30, 'réponse · 92 octets', { taille: 13, couleur: K.TEXTE, police: MONO, ancre: 'middle' })}
+${pastille(gx, bas - 50, 'clé d’envoi → · clé de réception ←', 'DISCRET', { taille: 12 })}${pastille(dx, bas - 50, '← clé d’envoi · clé de réception →', 'DISCRET', { taille: 12 })}${pastille(640, bas - 50, 'renouvelées toutes les deux minutes', 'DISCRET', { taille: 12 })}
 ${quand(C, 0.64, fin, `${pastille(gx, bas - 50, 'clé d’envoi → · clé de réception ←', 'CYAN', { taille: 12 })}${pastille(dx, bas - 50, '← clé d’envoi · clé de réception →', 'VERT', { taille: 12 })}${pastille(640, bas - 50, 'renouvelées toutes les deux minutes', 'BLEU', { taille: 12 })}`, 0.015)}
 ${t(640, bas + 30, 'e : clé éphémère · s : clé statique, envoyée chiffrée · es, ss, ee, se : échanges X25519 mêlés au hachage', { taille: 13, ancre: 'middle' })}`;
     svg('poignee.svg', 1280, bas + 60, corps, "La poignée de main Noise IK, en un aller-retour. Message 1, de l'initiateur au répondeur : e, es, s, ss et un horodatage TAI64N chiffré, 148 octets avec mac1 et mac2. Le répondeur ne répond pas à une clé inconnue. Message 2, en retour : e, ee, se et une charge vide chiffrée, 92 octets. Chaque côté en tire deux clés de session, une par sens, renouvelées toutes les deux minutes. e est la clé éphémère, s la clé statique envoyée chiffrée ; es, ss, ee et se sont des échanges X25519 mêlés au hachage.");
@@ -250,7 +251,7 @@ ${hauts.map((d) => bille(d, C, [[0.05, 0], [0.2, 1]], { contenu: sceau })).join(
 ${milieux.map((d) => bille(d, C, [[0.26, 0], [0.36, 1]], { contenu: sceau })).join('')}
 ${bas.map((d) => bille(d, C, [[0.5, 0], [0.62, 1]], { contenu: sceau })).join('')}
 ${apps.map((a) => quand(C, 0.64, 0.95, pastille(a.x + a.l - 70, a.y, 'signature juste', 'VERT', { taille: 11.5 }))).join('')}
-${quand(C, 0.36, 0.5, pastille(srv.x + srv.l - 10, srv.y - 22, 'un octet changé ? tous refusent', 'ROUGE', { taille: 11.5 }))}
+${quand(C, 0.36, 0.5, pastille(srv.x + srv.l + 135, srv.cy, 'un octet changé ? tous refusent', 'ROUGE', { taille: 11.5 }))}
 ${t(640, 690, 'Chaque signature porte son contexte (« CyberSas certificat v2 », « politique v1 », « revocations v1 ») : l’une ne sert jamais pour une autre.', { taille: 13.5, ancre: 'middle' })}`;
     svg('confiance.svg', 1280, 720, corps, "La chaîne de confiance du verrou. La clé du verrou, Ed25519, ne touche jamais le serveur. Elle signe trois sortes de documents : les certificats d'appareil (clé, adresse, groupe, 90 jours), la politique versionnée, et la liste des révocations versionnée. Le serveur sasd les transmet sans pouvoir y toucher : un octet changé et tous les refusent. Chaque appareil, fold8-tristan, laptop-lea et la maison, vérifie la signature puis applique. Chaque signature porte son contexte, pour qu'une signature faite pour l'une ne serve jamais pour une autre.");
   }
@@ -301,13 +302,13 @@ ${t(640, y + 194, 'Le fichier chiffré, copié ailleurs, ne vaut rien : la clé 
     const d1 = trace(att.ancre('d', 0.3), p1.ancre('g'), 'courbe');
     const d2 = trace(att.ancre('d', 0.5), p2.ancre('g'));
     const d3 = trace(att.ancre('d', 0.7), p3.ancre('g'), 'courbe');
-    const d4 = `M ${att.cx} ${att.y + att.h} V 600 H ${mai.cx} V ${mai.y + mai.h}`;
+    const d4 = `M ${att.cx} ${att.y + att.h} C ${att.cx} 660 ${mai.cx} 660 ${mai.cx} ${mai.y + mai.h}`;
     const tir = (d, de) => bille(d, C, [[de, 0], [de + 0.1, 0.96]], { couleur: 'ROUGE', rayon: 5 });
     const corps = `
 ${entete(1280, 'CE QUI EST EXPOSÉ, ET CE QUI RÉPOND', 'Un seul point public, le VPS. Un scan n’y trouve presque rien à qui parler.')}
 ${vps}${mz}
 ${fil(d1, { couleur: 'ROUGE', pointe: true, opacite: 0.6 })}${fil(d2, { couleur: 'ROUGE', pointe: true, opacite: 0.6 })}${fil(d3, { couleur: 'ROUGE', pointe: true, opacite: 0.6 })}
-${fil(d4, { couleur: 'ROUGE', opacite: 0.6 })}
+${fil(d4, { couleur: 'ROUGE', pointe: true, opacite: 0.6 })}
 ${att}${p1}${p2}${p3}${mai}
 ${tir(d1, 0.03)}${tir(d2, 0.25)}${tir(d3, 0.47)}${bille(d4, C, [[0.69, 0], [0.84, 0.93]], { couleur: 'ROUGE', rayon: 5 })}
 ${quand(C, 0.13, 0.25, pastille(p1.x + p1.l - 100, p1.y, '… silence', 'ROUGE', { taille: 12 }))}

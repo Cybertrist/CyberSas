@@ -186,27 +186,34 @@ ${bulle(mai, 'DÉCHIFFRÉ, À LA MAISON', [['GET / HTTP/1.1'], ['Host: maison.sa
     .map(([de, vers, texte, couleur, ic], i) => {
       const y = y0 + i * pas;
       const a = 0.03 + i * tranche;
-      const num = quand(C, a, fin, t(26, y + 5, String(i + 1).padStart(2, '0'), { taille: 12, couleur: K.DISCRET, police: MONO }));
+      // Chaque étape existe en fantôme dès la première image, et s'allume
+      // à son tour : le schéma se lit à tout instant.
+      const num = t(26, y + 5, String(i + 1).padStart(2, '0'), { taille: 12, couleur: K.DISCRET, police: MONO }) +
+        quand(C, a, fin, t(26, y + 5, String(i + 1).padStart(2, '0'), { taille: 12, couleur: K[couleur], police: MONO }), 0.012);
       if (de === vers) {
         // Une action sur place : une boîte posée sur la ligne de vie.
         const x = cols[de];
         const l = S.largeur(texte, 13.5) + 64;
         const bx = Math.min(Math.max(x - l / 2, 48), 1240 - l);
         S.controle(texte, 13.5, S.SANS, l - 58, `étape ${i + 1}`);
-        return num + quand(C, a, fin, `<rect x="${bx}" y="${y - 17}" width="${l}" height="34" rx="10" fill="${K.CARTE}" stroke="${K[couleur]}" stroke-opacity="0.7"/>
-  ${picto(ic.name, bx + 22, y, couleur, 0.66)}
-  ${t(bx + 42, y + 5, texte, { taille: 13.5, couleur: K.TITRE })}`, 0.012);
+        const boiteAction = (bord, encre, opac) => `<rect x="${bx}" y="${y - 17}" width="${l}" height="34" rx="10" fill="${K.CARTE}" stroke="${bord}" stroke-opacity="${opac}"/>
+  ${picto(ic.name, bx + 22, y, bord, 0.66)}
+  ${t(bx + 42, y + 5, texte, { taille: 13.5, couleur: encre })}`;
+        return num + boiteAction(K.FIL, K.DISCRET, 1) + quand(C, a, fin, boiteAction(K[couleur], K.TITRE, 0.7), 0.012);
       }
       const x1 = cols[de], x2 = cols[vers];
-      const s = Math.sign(x2 - x1);
-      const d = `M ${x1 + s * 8} ${y} H ${x2 - s * 8}`;
+      const sg = Math.sign(x2 - x1);
+      const d = `M ${x1 + sg * 8} ${y} H ${x2 - sg * 8}`;
       const lx = (x1 + x2) / 2;
       const lp = S.largeur(texte, 12.5, MONO) + 26;
       S.controle(texte, 12.5, MONO, Math.abs(x2 - x1) - 40, `étape ${i + 1}`);
+      const etiquette = (encre) => `<rect x="${lx - lp / 2}" y="${y - 29}" width="${lp}" height="22" rx="7" fill="${K.FOND}"/>${t(lx, y - 13, texte, { taille: 12.5, couleur: encre, police: MONO, ancre: 'middle' })}`;
       return num +
+        `<circle cx="${x1}" cy="${y}" r="4" fill="${K.FIL}"/>` +
         quand(C, a, fin, `<circle cx="${x1}" cy="${y}" r="5" fill="${K[couleur]}"/>`, 0.012) +
         trace_anime(d, C, a, a + tranche * 0.55, fin, { couleur }) +
-        quand(C, a + tranche * 0.3, fin, `<rect x="${lx - lp / 2}" y="${y - 29}" width="${lp}" height="22" rx="7" fill="${K.FOND}"/>${t(lx, y - 13, texte, { taille: 12.5, couleur: K.TITRE, police: MONO, ancre: 'middle' })}`, 0.012);
+        etiquette(K.DISCRET) +
+        quand(C, a + tranche * 0.3, fin, etiquette(K.TITRE), 0.012);
     })
     .join('\n');
   const h = y0 + etapes.length * pas + 10;
@@ -236,12 +243,12 @@ ${messages}`;
   const [px2, py2] = surCourbe(a2, b2, 0.5);
   const corps = `
 ${entete(1280, 'UN SERVEUR PIRATÉ NE FAIT ENTRER PERSONNE', 'Chaque appareil vérifie lui-même le certificat de l’autre, signé par la clé du verrou.')}
-${fil(d1)}${fil(d2)}
+${fil(d1, { pointe: true })}${fil(d2, { pointe: true })}
 ${intrus}${lea}${tel}
 ${bille(d1, C, [[0.06, 0], [0.3, 0.97]], { couleur: 'ROUGE', rayon: 5 })}
-${quand(C, 0.3, 0.46, `${picto('croix', b1[0] - 26, b1[1], 'ROUGE', 0.8)}${pastille(px1, py1 - 34, 'refusé · pas de signature du verrou', 'ROUGE')}`)}
+${quand(C, 0.3, 0.46, `${picto('croix', b1[0] - 26, b1[1], 'ROUGE', 0.8)}${pastille(tel.cx, tel.y + tel.h + 34, 'refusé · pas de signature du verrou', 'ROUGE')}`)}
 ${bille(d2, C, [[0.5, 0], [0.74, 1]], { couleur: 'VERT', rayon: 5 })}
-${quand(C, 0.74, 0.93, `<rect x="${tel.x}" y="${tel.y}" width="${tel.l}" height="${tel.h}" rx="14" fill="none" stroke="${K.VERT}" stroke-width="1.6" filter="url(#halo)"/>${pastille(px2, py2 + 36, 'accepté · signé par le verrou', 'VERT')}`)}`;
+${quand(C, 0.74, 0.93, `<rect x="${tel.x}" y="${tel.y}" width="${tel.l}" height="${tel.h}" rx="14" fill="none" stroke="${K.VERT}" stroke-width="1.6" filter="url(#halo)"/>${pastille(tel.cx, tel.y + tel.h + 34, 'accepté · signé par le verrou', 'VERT')}`)}`;
   svg('verrou.svg', 1280, 360, corps, "Un serveur piraté glisse un intrus dans le réseau : le téléphone fold8-tristan vérifie le certificat, ne trouve pas de signature du verrou, et le refuse. L'ordinateur laptop-lea, signé par le verrou, est accepté.");
 }
 
@@ -258,15 +265,14 @@ ${quand(C, 0.74, 0.93, `<rect x="${tel.x}" y="${tel.y}" width="${tel.l}" height=
   const tel = carte(40, 190, 290, 76, 'fold8-tristan', 'l’appli Android', K.CYAN, { icone: P.telephone, allume: [0.04, 0.3], cycle: C });
   const lap = carte(40, 330, 290, 76, 'laptop-lea', 'le client sas, Linux', K.CYAN, { icone: P.portable });
   const maisonZ = zone(950, 140, 290, 200, 'LA MAISON', 'VERT');
-  const mai = carte(970, 190, 250, 76, 'maison', 'aucun port ouvert', K.VERT, { icone: P.maison, allume: [0.5, 0.76], cycle: C });
-  const ggl = carte(970, 400, 250, 70, 'Google', 'le compte, le jeton', K.DISCRET, { icone: P.google });
+  const mai = carte(970, 194, 250, 76, 'maison', 'aucun port ouvert', K.VERT, { icone: P.maison, allume: [0.5, 0.76], cycle: C });
+  const ggl = carte(970, 396, 250, 70, 'Google', 'le compte, le jeton', K.DISCRET, { icone: P.google });
   const d1 = trace(tel.ancre('d'), sd.ancre('g', 0.35), 'courbe');
   const d2 = trace(lap.ancre('d'), sd.ancre('g', 0.7), 'courbe');
   const d3 = trace(mai.ancre('g'), sd.ancre('d', 0.5), 'courbe');
   const d4 = `M ${ng.cx} ${ng.y} V ${sd.y + sd.h}`;
   const d5 = `M ${op.cx} ${op.y} V ${ng.y + ng.h}`;
-  const d6 = trace(op.ancre('d'), ggl.ancre('g', 0.7), 'courbe');
-  const d7 = trace(sd.ancre('d', 0.8), ggl.ancre('g', 0.3), 'coude', { milieu: 0.3 });
+  const d6 = trace(op.ancre('d'), ggl.ancre('g'));
   // Le chemin de bout en bout, par le relais : téléphone, sasd, maison.
   const x1 = tel.x + tel.l, x3 = mai.x;
   const cheminPaquet = `M ${x1} ${tel.cy - 12} C ${(x1 + sd.x) / 2} ${tel.cy - 12} ${(x1 + sd.x) / 2} ${sd.y + sd.h * 0.35} ${sd.x} ${sd.y + sd.h * 0.35} H ${sd.x + sd.l} C ${(sd.x + sd.l + x3) / 2} ${sd.cy} ${(sd.x + sd.l + x3) / 2} ${mai.cy} ${x3} ${mai.cy}`;
@@ -274,11 +280,10 @@ ${quand(C, 0.74, 0.93, `<rect x="${tel.x}" y="${tel.y}" width="${tel.l}" height=
 ${entete(1280, 'CE QU’IL Y A DEDANS, ET QUI PARLE À QUI', 'Tous les tunnels sortent vers le VPS, la maison comprise : elle n’a aucun port ouvert.')}
 ${vps}${maisonZ}
 ${fil(d1, { couleur: 'CYAN', pointe: true })}${fil(d2, { couleur: 'CYAN', pointe: true })}${fil(d3, { couleur: 'VERT', pointe: true })}
-${fil(d4, { plein: true, couleur: 'BLEU', opacite: 0.6 })}${fil(d5, { plein: true, couleur: 'BLEU', opacite: 0.6 })}${fil(d6, { couleur: 'DISCRET', pointe: true })}${fil(d7, { couleur: 'DISCRET', pointe: true })}
+${fil(d4, { plein: true, couleur: 'BLEU', opacite: 0.6 })}${fil(d5, { plein: true, couleur: 'BLEU', opacite: 0.6 })}${fil(d6, { couleur: 'DISCRET', pointe: true })}
 ${sd}${ng}${op}${tel}${lap}${mai}${ggl}
 ${pastille(tel.cx, tel.y - 26, 'UDP 51820, vers le VPS', 'CYAN', { taille: 12 })}
 ${pastille(mai.cx, mai.y + mai.h + 30, 'sort vers le VPS', 'VERT', { taille: 12 })}
-${t(ggl.x + ggl.l, ggl.y - 12, 'sasd y vérifie le jeton', { taille: 11.5, couleur: K.DISCRET, police: MONO, ancre: 'end' })}
 ${t(ng.cx + 10, (sd.y + sd.h + ng.y) / 2 + 4, '127.0.0.1', { taille: 11.5, couleur: K.DISCRET, police: MONO })}
 ${bille(cheminPaquet, C, [[0.06, 0], [0.62, 1]], { contenu: `<circle r="11" fill="${K.CYAN}" opacity="0.2"/><g transform="translate(-7,-7) scale(0.5)">${P.cadenas(K.CYAN)}</g>` })}
 ${quand(C, 0.3, 0.62, pastille(sd.cx, sd.y - 20, 'relayé, chiffré de bout en bout', 'CYAN', { taille: 12 }))}
@@ -317,7 +322,7 @@ ${quand(C, 0.4, 0.93, pastille(srv.cx, srv.y + srv.h + 28, 'revocations.json', '
 ${dCibles.map((d) => bille(d, C, [[0.46, 0], [0.62, 1]], { couleur: 'BLEU', rayon: 5 })).join('')}
 ${bille(dRev, C, [[0.46, 0], [0.62, 1]], { couleur: 'BLEU', rayon: 5 })}
 ${cibles.map((c) => quand(C, 0.62, 0.93, pastille(c.x + c.l - 64, c.y, 'v4 retenue', 'VERT', { taille: 11.5 }))).join('')}
-${quand(C, 0.66, 0.93, `<path d="${dRev}" fill="none" stroke="${K.ROUGE}" stroke-width="2.4"/>${pastille(rev.x + rev.l - 58, rev.y, 'coupé', 'ROUGE', { taille: 11.5 })}`)}
+${quand(C, 0.66, 0.93, `<path d="${dRev}" fill="none" stroke="${K.ROUGE}" stroke-width="2.4" marker-end="url(#pROUGE)"/>${pastille(rev.x + rev.l - 58, rev.y, 'coupé', 'ROUGE', { taille: 11.5 })}`)}
 ${t(640, 486, 'Les appareils gardent la plus récente vue, et n’acceptent jamais d’en revenir à une plus ancienne.', { taille: 13.5, ancre: 'middle' })}`;
   svg('revocation.svg', 1280, 516, corps, "Révoquer un appareil depuis l'appli. Sur son téléphone fold8-tristan, l'admin touche Révoquer portable-test ; après son empreinte, le téléphone signe la liste de révocation v4 avec la clé du verrou. Le serveur sasd vérifie la signature et que v4 est plus récente que v3, la garde dans revocations.json et la transmet. La maison et laptop-lea retiennent la v4 ; portable-test est coupé. Les appareils n'acceptent jamais une liste plus ancienne.");
 }

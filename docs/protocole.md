@@ -6,9 +6,8 @@
 
 <br>
 
-Tout ce qui se passe entre un appareil, le serveur et les autres appareils, octet par octet. Le code est dans [`internal/noise`](../internal/noise), [`internal/tunnel`](../internal/tunnel), [`internal/protocole`](../internal/protocole), [`internal/verrou`](../internal/verrou) et [`internal/client`](../internal/client).
+Tout ce qui se passe entre un appareil, le serveur et les autres appareils, octet par octet. Le code vit dans `internal/` : `noise`, `tunnel`, `protocole`, `verrou` et `client`.
 
-[Ce qui est à nous](#ce-qui-est-a-nous) · [Deux couches](#deux-couches) · [La poignée de main](#la-poignee-de-main) · [Les messages](#les-messages) · [Les sessions](#les-sessions) · [Ce que le tunnel refuse](#ce-que-le-tunnel-refuse) · [L'inondation](#l-inondation) · [Le filtre](#le-filtre) · [L'inscription](#l-inscription) · [Le verrou](#le-verrou) · [Itinérance](#itinerance-et-reprise) · [Ce qui manque](#ce-qui-manque-encore)
 
 <a name="ce-qui-est-a-nous"></a>
 <img src="sections/protocole/s01.png" alt="01 Ce qui est à nous" width="100%">
@@ -122,7 +121,7 @@ Le lien d'invitation porte la clé publique du verrou : le nouvel appareil la co
 
 Une clé déjà inscrite ne change jamais de propriétaire ni d'étiquette. Le nom d'une machine est fixé par l'admin ; celui d'un appareil personnel porte toujours le nom de son propriétaire (`portable-alice`), pour que personne ne prenne celui d'une machine ou du serveur.
 
-Toutes les clés, signatures et preuves reçues sont décodées par un décodeur base64 **canonique** ([`internal/b64`](../internal/b64)) : une valeur n'a qu'une écriture acceptée. Le décodeur standard en accepte plusieurs, et un serveur piraté s'en serait servi pour faire passer une clé révoquée.
+Toutes les clés, signatures et preuves reçues sont décodées par un décodeur base64 **canonique** (`internal/b64`) : une valeur n'a qu'une écriture acceptée. Le décodeur standard en accepte plusieurs, et un serveur piraté s'en serait servi pour faire passer une clé révoquée.
 
 <a name="le-verrou"></a>
 <img src="sections/protocole/s10.png" alt="10 Le verrou" width="100%">
@@ -144,7 +143,7 @@ Chaque appareil retient la clé publique du verrou à l'inscription. Ensuite :
 - il n'accepte jamais une politique ou une liste de révocation plus ancienne que la dernière vue, et garde les versions vues sur disque ;
 - il refuse tout changement ou toute disparition du verrou, et de la clé du serveur, même en se réinscrivant, sauf si on le lui demande explicitement.
 
-Comment on s'en sert, où vit la clé et comment le téléphone la protège : [`verrou.md`](verrou.md).
+Comment on s'en sert, où vit la clé et comment le téléphone la protège : [le document du verrou](verrou.md).
 
 <a name="itinerance-et-reprise"></a>
 <img src="sections/protocole/s11.png" alt="11 Itinérance et reprise" width="100%">
@@ -156,10 +155,15 @@ Comment on s'en sert, où vit la clé et comment le téléphone la protège : [`
 
 <img src="schemas/protocole/manque.png" alt="Ce qui manque encore. IPv4 seulement à l'intérieur du tunnel ; le transport, lui, passe aussi en IPv6. Pas de liaison directe : tout passe par le relais du serveur, chiffré de bout en bout, plus simple derrière n'importe quelle box, au prix d'un détour. Aucun audit humain : les tests prouvent la conformité à Noise et le refus des attaques connues, cela ne remplace pas le regard d'un cryptographe." width="100%">
 
-Les relectures automatiques, leurs constats et ce qui en a été fait sont dans [`audit.md`](audit.md).
+Les relectures automatiques, leurs constats et ce qui en a été fait sont dans [l'audit](audit.md).
 
 <br>
 
 <div align="center">
-<sub><a href="../README.md">Retour au README</a> · <a href="verrou.md">Le verrou</a> · <a href="menaces.md">Le modèle de menace</a> · <a href="audit.md">L'audit</a></sub>
+
+<a href="../README.md"><img src="nav/readme.png" alt="Le README : CyberSas en un coup d’œil." width="49%"></a>
+<a href="verrou.md"><img src="nav/verrou.png" alt="Le verrou : la chaîne de confiance, le coffre du téléphone, signer et révoquer." width="49%"></a>
+<a href="menaces.md"><img src="nav/menaces.png" alt="Le modèle de menace : ce qui est exposé, le serveur piraté, le téléphone volé." width="49%"></a>
+<a href="audit.md"><img src="nav/audit.png" alt="L’audit de sécurité : trois relectures, 79 constats." width="49%"></a>
+
 </div>

@@ -114,21 +114,24 @@ const quand = (cycle, de, a, contenu, douceur = 0.02) => `<g opacity="0">${visib
 /// Une carte : liseré coloré, pictogramme, titre en chasse fixe, sous-titre.
 /// Rend un objet qui connaît ses bords : c.ancre('g'|'d'|'h'|'b', f) donne
 /// le point du bord à la fraction f (0,5 = le milieu).
-function carte(x, y, l, h, titre, sous, accent, { icone = null, allume = null, cycle = 10, estompe = null, taille = 14.5 } = {}) {
+function carte(x, y, l, h, titre, sous, accent, { icone = null, allume = null, cycle = 10, estompe = null, taille = 14.5, enHaut = false } = {}) {
   const tx = x + (icone ? 58 : 20);
   controle(titre, taille, MONO, x + l - 12 - tx, `carte ${titre}`);
   if (sous) controle(sous, 12.5, SANS, x + l - 12 - tx, `carte ${titre}`);
   const bord = allume
     ? `<rect x="${x}" y="${y}" width="${l}" height="${h}" rx="14" fill="none" stroke="${accent}" stroke-width="1.6" opacity="0" filter="url(#halo)">${visible(cycle, allume[0], allume[1])}</rect>`
     : '';
-  const ty = sous ? y + h / 2 - 3 : y + h / 2 + 5;
+  // enHaut : le texte se range dans le haut de la carte, pour laisser le
+  // bas libre (un tuyau qui la traverse, par exemple).
+  const cyTexte = enHaut ? y + 38 : y + h / 2;
+  const ty = sous ? cyTexte - 3 : cyTexte + 5;
   const svg = `<g${estompe ? '' : ''}>
   <rect x="${x}" y="${y}" width="${l}" height="${h}" rx="14" fill="${K.CARTE}" stroke="${K.BORD}"/>
   ${bord}
   <rect x="${x}" y="${y + 14}" width="3" height="${h - 28}" rx="1.5" fill="${accent}"/>
-  ${icone ? `<g transform="translate(${x + 18},${y + h / 2 - 14})">${icone(accent)}</g>` : ''}
+  ${icone ? `<g transform="translate(${x + 18},${cyTexte - 14})">${icone(accent)}</g>` : ''}
   ${t(tx, ty, titre, { taille, couleur: K.TITRE, police: MONO, poids: 700 })}
-  ${sous ? t(tx, y + h / 2 + 17, sous, { taille: 12.5 }) : ''}
+  ${sous ? t(tx, cyTexte + 17, sous, { taille: 12.5 }) : ''}
 </g>`;
   return boite(x, y, l, h, svg);
 }
@@ -181,8 +184,9 @@ function trace([x1, y1], [x2, y2], forme = 'droit', { vertical = false, rayon = 
 }
 
 /// Un fil dessiné : pointillé qui court, ou trait plein. La pointe se pose
-/// sur le bord d'arrivée ; une pastille marque le départ.
-function fil(d, { couleur = 'FIL', pointe = false, court = true, plein = false, epaisseur = 2, opacite = 1, depart = true } = {}) {
+/// sur le bord d'arrivée. Pas de pastille au départ par défaut : à moitié
+/// cachée sous la carte, elle faisait sale.
+function fil(d, { couleur = 'FIL', pointe = false, court = true, plein = false, epaisseur = 2, opacite = 1, depart = false } = {}) {
   const c = K[couleur] || couleur;
   const [, x0, y0] = d.match(/M\s*([-\d.]+)\s+([-\d.]+)/);
   const trait = plein ? '' : ` stroke-dasharray="6 7"`;
@@ -197,10 +201,13 @@ function trace_anime(d, cycle, de, a, fin, { couleur = 'CYAN', epaisseur = 2.4, 
   // Pas de filtre sur un trait : une ligne droite a une boîte de hauteur
   // nulle, et le filtre l'efface. Le halo est un second trait, large et pâle.
   const lueur = halo ? `<path d="${d}" fill="none" stroke="${c}" stroke-opacity="0.18" stroke-width="${epaisseur + 6}" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100">${off}</path>` : '';
+  // Le fantôme : le trajet complet, discret, toujours là. Le schéma se lit
+  // à tout instant ; l'animation ne fait que souligner.
+  const fantome = `<path d="${d}" fill="none" stroke="${K.FIL}" stroke-width="2" stroke-linecap="round"${pointe ? ' marker-end="url(#pFIL)"' : ''}/>`;
   // La pointe n'arrive qu'avec le trait : posée sur le tracé entier dès le
   // début, elle attendrait seule au bout.
   const bout = pointe ? quand(cycle, a - 0.005, fin, `<path d="${d}" fill="none" stroke="${c}" stroke-opacity="0" stroke-width="${epaisseur}" marker-end="url(#p${couleur})"/>`, 0.005) : '';
-  return quand(cycle, de, fin, `${lueur}<path d="${d}" fill="none" stroke="${c}" stroke-width="${epaisseur}" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100">${off}</path>`, 0.01) + bout;
+  return fantome + quand(cycle, de, fin, `${lueur}<path d="${d}" fill="none" stroke="${c}" stroke-width="${epaisseur}" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100">${off}</path>`, 0.01) + bout;
 }
 
 /// Une bille lumineuse qui suit un tracé quelconque. [etapes] : couples

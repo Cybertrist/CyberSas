@@ -6,9 +6,8 @@
 
 <br>
 
-Ce que CyberSas protège, contre qui, et ce qu'il ne promet pas. Chaque affirmation renvoie à un mécanisme décrit dans [`protocole.md`](protocole.md) ou [`verrou.md`](verrou.md), et la plupart à un test.
+Ce que CyberSas protège, contre qui, et ce qu'il ne promet pas. Chaque affirmation renvoie à un mécanisme décrit dans [le protocole](protocole.md) ou [le verrou](verrou.md), et la plupart à un test.
 
-[Ce qu'on protège](#ce-qu-on-protege) · [Ce qui est exposé](#ce-qui-est-expose) · [Contre qui](#contre-qui) · [Si le serveur tombe](#si-le-serveur-tombe) · [Si le téléphone de l'admin est volé](#si-le-telephone-est-vole) · [Ce qu'il ne promet pas](#ce-qu-il-ne-promet-pas)
 
 <a name="ce-qu-on-protege"></a>
 <img src="sections/menaces/s01.png" alt="01 Ce qu'on protège" width="100%">
@@ -64,10 +63,15 @@ Un voleur qui trouve le téléphone verrouillé n'a rien. S'il le trouve déverr
 
 <img src="schemas/menaces/promet-pas.png" alt="Ce que CyberSas ne promet pas. Pas d'audit humain : le protocole reprend WireGuard, suit les vecteurs de Noise, a résisté à des millions de messages forgés et à trois relectures, mais peu de gens l'ont lu ; pour des données dont la fuite serait grave, WireGuard reste le choix raisonnable. Les métadonnées : le serveur voit qui parle à qui, quand et combien. Google, tiers de confiance pour les inscriptions seulement : en panne, personne n'entre mais ceux qui sont dedans continuent ; un compte volé inscrit un appareil, inutile tant que l'admin ne l'a pas signé. Le premier contact : un appareil à qui l'on ne donne pas la clé du verrou retient la première annoncée ; le lien d'invitation la donne d'avance, et l'empreinte permet de vérifier." width="100%">
 
-Les relectures, leurs constats et ce qui en a été fait : [`audit.md`](audit.md).
+Les relectures, leurs constats et ce qui en a été fait : [l'audit](audit.md).
 
 <br>
 
 <div align="center">
-<sub><a href="../README.md">Retour au README</a> · <a href="protocole.md">Le protocole</a> · <a href="verrou.md">Le verrou</a> · <a href="audit.md">L'audit</a></sub>
+
+<a href="../README.md"><img src="nav/readme.png" alt="Le README : CyberSas en un coup d’œil." width="49%"></a>
+<a href="protocole.md"><img src="nav/protocole.png" alt="Le protocole : les deux couches, Noise IK, les messages à l’échelle, le filtre." width="49%"></a>
+<a href="verrou.md"><img src="nav/verrou.png" alt="Le verrou : la chaîne de confiance, le coffre du téléphone, signer et révoquer." width="49%"></a>
+<a href="audit.md"><img src="nav/audit.png" alt="L’audit de sécurité : trois relectures, 79 constats." width="49%"></a>
+
 </div>

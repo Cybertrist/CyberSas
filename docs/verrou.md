@@ -6,9 +6,8 @@
 
 <br>
 
-Le verrou protège le réseau contre son propre serveur. Avec lui, un serveur piraté ne peut ni s'intercaler entre deux appareils, ni leur ouvrir des ports, ni faire revenir un appareil banni. Le principe est décrit dans [`protocole.md`](protocole.md) ; ce document dit où vit la clé et comment s'en servir.
+Le verrou protège le réseau contre son propre serveur. Avec lui, un serveur piraté ne peut ni s'intercaler entre deux appareils, ni leur ouvrir des ports, ni faire revenir un appareil banni. Le principe est décrit dans [le document du protocole](protocole.md) ; celui-ci dit où vit la clé et comment s'en servir.
 
-[La règle d'or](#la-regle-d-or) · [La chaîne de confiance](#la-chaine-de-confiance) · [Le coffre du téléphone](#le-coffre-du-telephone) · [Créer le verrou](#creer-le-verrou) · [Signer un appareil](#signer-un-appareil) · [Signer la politique](#signer-la-politique) · [Bannir un appareil](#bannir-un-appareil) · [Perte ou vol](#si-la-cle-est-perdue-ou-volee)
 
 <a name="la-regle-d-or"></a>
 <img src="sections/verrou/s01.png" alt="01 La règle d'or" width="100%">
@@ -31,7 +30,7 @@ Le serveur est un facteur : il porte les lettres, il ne peut pas les réécrire.
 
 <img src="schemas/verrou/coffre.svg" alt="Le coffre de la clé du verrou sur le téléphone de l'admin, en cinq temps : l'empreinte, par l'invite biométrique forte d'Android ; la clé AES du Keystore, dans la puce StrongBox, utilisable pour cette seule opération ; le fichier verrou.chiffre, déchiffré en mémoire ; le moteur Go, qui signe le document ; puis la clé est effacée, ses tableaux remis à zéro. Une empreinte ajoutée au téléphone invalide la clé AES. Le fichier chiffré copié ailleurs ne vaut rien." width="100%">
 
-Le code est dans [`Coffre.kt`](../mobile/android/app/src/main/kotlin/fr/cybersas/cybersas/Coffre.kt) et [`MainActivity.kt`](../mobile/android/app/src/main/kotlin/fr/cybersas/cybersas/MainActivity.kt).
+Le code est dans `Coffre.kt` et `MainActivity.kt`, côté Android de l'appli.
 
 - **Une empreinte, une opération.** La clé AES du Keystore n'a aucune durée de validité : elle n'accepte que le chiffreur que l'invite biométrique vient d'authentifier. Déverrouiller le téléphone au doigt ne suffit donc pas à ouvrir le coffre dix secondes plus tard.
 - **Une empreinte forte.** L'invite n'accepte que la biométrie de classe forte : pas un visage de classe faible, pas le code du téléphone.
@@ -117,5 +116,10 @@ C'est pour cela qu'un secours pour la clé du verrou est dans la feuille de rout
 <br>
 
 <div align="center">
-<sub><a href="../README.md">Retour au README</a> · <a href="protocole.md">Le protocole</a> · <a href="menaces.md">Le modèle de menace</a> · <a href="audit.md">L'audit</a></sub>
+
+<a href="../README.md"><img src="nav/readme.png" alt="Le README : CyberSas en un coup d’œil." width="49%"></a>
+<a href="protocole.md"><img src="nav/protocole.png" alt="Le protocole : les deux couches, Noise IK, les messages à l’échelle, le filtre." width="49%"></a>
+<a href="menaces.md"><img src="nav/menaces.png" alt="Le modèle de menace : ce qui est exposé, le serveur piraté, le téléphone volé." width="49%"></a>
+<a href="audit.md"><img src="nav/audit.png" alt="L’audit de sécurité : trois relectures, 79 constats." width="49%"></a>
+
 </div>

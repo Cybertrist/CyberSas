@@ -9,7 +9,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/rendu.sh"
 S="$DOCS/schemas"
 
 # =========================================================== le protocole
-banniere_doc "$DOCS/banniere-protocole.png" "DOCUMENT · LE PROTOCOLE" "Octet par octet" \
+banniere_doc "$DOCS/banniere-protocole.png" "CYBERSAS · DOCUMENTATION" "Le protocole" \
   "Tout ce qui se passe entre un appareil, le serveur et les autres appareils, et pourquoi le serveur n'y lit rien." \
   "Noise IK" "X25519" "ChaCha20-Poly1305" "BLAKE2s" "Ed25519"
 bandeaux "$DOCS/sections/protocole" "Ce qui est à nous" "Deux couches" "La poignée de main" "Les messages" \
@@ -55,7 +55,7 @@ grille "$S/protocole/manque.png" 3 \
   "person_search|Aucun audit humain|Les tests prouvent la conformité à Noise et le refus des attaques connues. Cela ne remplace pas le regard d'un cryptographe."
 
 # ============================================================== le verrou
-banniere_doc "$DOCS/banniere-verrou.png" "DOCUMENT · LE VERROU" "Un serveur qu'on n'a pas à croire" \
+banniere_doc "$DOCS/banniere-verrou.png" "CYBERSAS · DOCUMENTATION" "Le verrou" \
   "La clé qui signe qui entre, où elle vit, et comment s'en servir pas à pas." \
   "Ed25519" "Keystore" "StrongBox" "empreinte"
 bandeaux "$DOCS/sections/verrou" "La règle d'or" "La chaîne de confiance" "Le coffre du téléphone" "Créer le verrou" \
@@ -70,7 +70,7 @@ grille "$S/verrou/perte.png" 2 \
   "gpp_bad|Volée|Même chose, et vite : le voleur peut signer ce qu'il veut tant que les appareils font confiance à l'ancienne. Sur le téléphone, il lui faudrait d'abord le doigt de l'admin."
 
 # ========================================================== les menaces
-banniere_doc "$DOCS/banniere-menaces.png" "DOCUMENT · LE MODÈLE DE MENACE" "Contre qui, et jusqu'où" \
+banniere_doc "$DOCS/banniere-menaces.png" "CYBERSAS · DOCUMENTATION" "Le modèle de menace" \
   "Ce que CyberSas protège, ce qu'un attaquant peut encore faire, et ce qu'il ne promet pas."
 bandeaux "$DOCS/sections/menaces" "Ce qu'on protège" "Ce qui est exposé" "Contre qui" "Si le serveur tombe" \
   "Si le téléphone de l'admin est volé" "Ce qu'il ne promet pas"
@@ -108,8 +108,8 @@ grille "$S/menaces/promet-pas.png" 2 \
   "handshake|Le premier contact|Un appareil à qui l'on ne donne pas la clé du verrou retient la première annoncée. Le lien d'invitation la donne d'avance ; l'empreinte permet de vérifier."
 
 # ============================================================== l'audit
-banniere_doc "$DOCS/banniere-audit.png" "DOCUMENT · L'AUDIT" "Trois relectures" \
-  "79 constats. Qui a relu quoi, ce qui a été trouvé, ce qui a été corrigé, et ce qui reste." \
+banniere_doc "$DOCS/banniere-audit.png" "CYBERSAS · DOCUMENTATION" "L’audit de sécurité" \
+  "Trois relectures, 79 constats : qui a relu quoi, ce qui a été trouvé, et ce qui en a été fait." \
   "3 relecteurs" "8 outils" "fuzzing" "tests de non-régression"
 bandeaux "$DOCS/sections/audit" "Ce que cet audit est" "Relancer les preuves" "Protocole et cryptographie" "Serveur" \
   "Clients et déploiement" "Revue des corrections" "Trouvé en corrigeant" "Deuxième audit : les outils" \
@@ -119,3 +119,23 @@ grille "$S/audit/trois.png" 3 \
   "groups|Premier audit · 24/09|Trois relecteurs indépendants (protocole, serveur, clients) puis une revue de sécurité des corrections. <b>46 constats, dont 3 hauts.</b>" \
   "build|Deuxième audit · 24/09|Les outils du métier : govulncheck, staticcheck, gosec, Semgrep, Trivy, Hadolint, ShellCheck, Gixy, et du fuzzing différentiel. <b>10 constats.</b>" \
   "smartphone|Troisième audit · 26/09|Ce qui a changé depuis : les routes d'admin, l'Android natif, la frontière entre l'appli et le moteur. <b>23 constats, dont 1 haut.</b>"
+
+# ================================================ les cartes de navigation
+# Deux par ligne, sous le README et au bas de chaque document.
+N="$DOCS/nav"
+carte_lien "$N/readme.png" "home" "Le README" "CyberSas en un coup d'œil : ce que c'est, l'appli, le labo."
+carte_lien "$N/protocole.png" "sync_alt" "Le protocole" "Les deux couches, Noise IK, les messages à l'échelle, le filtre."
+carte_lien "$N/verrou.png" "key" "Le verrou" "La chaîne de confiance, le coffre du téléphone, signer et révoquer."
+carte_lien "$N/menaces.png" "shield" "Le modèle de menace" "Ce qui est exposé, le serveur piraté, le téléphone volé."
+carte_lien "$N/audit.png" "fact_check" "L'audit de sécurité" "Trois relectures, 79 constats, et ce qui a été fait de chacun."
+
+grille "$S/audit/outils.png" 3 \
+  "bug_report|govulncheck|Les vulnérabilités connues des dépendances, seulement celles que le code appelle vraiment." \
+  "fact_check|staticcheck|L'analyse statique de référence pour Go." \
+  "warning|gosec|Les motifs dangereux en Go : débordements, erreurs ignorées, chemins, commandes." \
+  "rule|Semgrep|91 règles Go, Dockerfile et Nginx." \
+  "inventory_2|Trivy|Les vulnérabilités de l'image Docker, sa configuration, et les secrets oubliés." \
+  "deployed_code|Hadolint|Les bonnes pratiques du Dockerfile." \
+  "terminal|ShellCheck|Les pièges de Bash dans <code>scripts/sas.sh</code>." \
+  "dns|Gixy|Les erreurs de configuration de Nginx, sur la configuration réellement chargée." \
+  "shuffle|Fuzzing long|Huit cibles, trois minutes chacune, dont quatre nouvelles, différentielles contre flynn/noise."

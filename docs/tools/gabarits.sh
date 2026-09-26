@@ -8,7 +8,7 @@ ICONES='<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Ro
 # page <nom> <sortie.png> : rend html/<nom>.html (déjà écrite) vers sortie.
 page () {
   mkdir -p "$(dirname "$2")"
-  rendre "$1.html" "$2"
+  rendre "$1.html" "$2" "${3:-1280}"
 }
 
 # bandeau <numéro> <titre> <sortie.png>
@@ -125,7 +125,7 @@ h1{font-family:Syne,sans-serif;font-weight:800;font-size:46px;line-height:1.05;l
 .ln{position:absolute;left:0;right:0;bottom:0;height:3px;background:linear-gradient(90deg,#31E7FD 0%,#01B9FD 40%,transparent 90%)}
 </style></head><body>
 <div class="w"><div class="grille"></div>
-<div class="cat"><b>CYBERSAS</b><b>DOC</b></div>
+
 <div class="in"><img class="logo" src="file:///$DOCS/logo.png">
 <div><div class="et">$etiq</div><h1>$titre</h1><p class="sl">$phrase</p>$pl</div></div>
 <div class="ln"></div></div>
@@ -172,4 +172,25 @@ h3{font-family:'Space Grotesk',sans-serif;font-size:15.5px;font-weight:700}
 HTML
 pied; } > "$D/html/$nom.html"
 page "$nom" "$sortie"
+}
+
+# carte_lien <sortie.png> <icone> <titre> <texte>
+# Une carte cliquable vers un document : posée deux par ligne, dans une
+# balise <a>, elle remplace les liens bleus soulignés.
+carte_lien () {
+local sortie="$1" nom="l-$(basename "$1" .png)"
+{ entete 620; echo "$ICONES"; cat <<HTML
+<style>
+.c{margin:8px;height:128px;background:linear-gradient(135deg,#0F1A22,#0A0F15);border:1px solid #31E7FD40;border-radius:16px;
+  display:flex;align-items:center;gap:18px;padding:0 22px;position:relative;overflow:hidden}
+.c:after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,#31E7FD,#01B9FD 50%,transparent)}
+.ic{font-family:'Material Symbols Rounded';font-size:28px;width:56px;height:56px;flex-shrink:0;border-radius:15px;
+  display:flex;align-items:center;justify-content:center;color:#31E7FD;background:#31E7FD14;border:1px solid #31E7FD40;box-shadow:0 0 20px #31E7FD26}
+h3{font-family:'Space Grotesk',sans-serif;font-size:19px;font-weight:700;margin-bottom:5px}
+p{font-family:'Space Grotesk',sans-serif;font-size:13.5px;line-height:1.45;color:var(--texte)}
+.fl{margin-left:auto;font-family:'Material Symbols Rounded';font-size:26px;color:#31E7FD}
+</style></head><body><div class="c"><span class="ic">$2</span><div><h3>$3</h3><p>$4</p></div><span class="fl">arrow_forward</span></div>
+HTML
+pied; } > "$D/html/$nom.html"
+page "$nom" "$sortie" 620
 }

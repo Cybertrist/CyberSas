@@ -10,6 +10,7 @@ Ce document rend compte des relectures de sécurité de CyberSas : qui a relu qu
 
 <img src="schemas/audit/trois.png" alt="Trois audits. Premier audit, le 24 septembre : trois relecteurs indépendants, protocole, serveur et clients, puis une revue de sécurité des corrections ; 46 constats, dont 3 hauts. Deuxième audit, le même jour : les outils du métier, govulncheck, staticcheck, gosec, Semgrep, Trivy, Hadolint, ShellCheck, Gixy et du fuzzing différentiel ; 10 constats. Troisième audit, le 26 septembre : ce qui a changé depuis, les routes d'admin, l'Android natif, la frontière entre l'appli et le moteur ; 23 constats, dont 1 haut." width="100%">
 
+
 <a name="ce-que-cet-audit-est"></a>
 <img src="sections/audit/s01.png" alt="01 Ce que cet audit est" width="100%">
 
@@ -71,11 +72,6 @@ la fenêtre anti-rejeu, la séparation des chemins direct et relayé, les
 trames de relais (pas d'imbrication, pas d'amplification), mac1 et mac2
 conformes à WireGuard, la lecture des paquets IPv4, et l'ordre des verrous.
 Ses constats :
-
-<img src="schemas/audit/fiches-protocole-et-cryptographie.png" alt="T1 La destination des paquets reçus n'était pas vérifiée (moyenne à haute, corrigé) ; T2 Une réponse forgée cassait la poignée de main en cours (moyenne, corrigé) ; T3 La limite de débit se contournait en IPv6 (moyenne, corrigé) ; T4 Les poignées de main relayées n'étaient pas limitées (moyenne à basse, corrigé) ; T5 Un pair pouvait remplir le suivi des connexions d'un autre (basse à moyenne, corrigé) ; T6 Un flux à sens unique relançait une poignée de main toutes les 15 secondes (basse, corrigé) ; T7 Après un abandon, les tentatives ne repartaient pas de zéro (basse, corrigé) ; T8 Un pair retiré pendant sa poignée de main pouvait revenir (basse, corrigé) ; T9 Pas de détection de collision d'indice (basse, corrigé) ; T10 Le suivi ICMP laissait entrer n'importe quel type (basse, corrigé) ; Horodatage trop précis (info, corrigé) ; Un cookie peut être forgé (info, accepté) ; L'itinérance suit l'initiation (info, accepté) ; Clé du répondeur compromise (KCI) (info, accepté) ; Le numéro d'appareil n'est pas signé (info, accepté) ; Documentation en retard sur le code (info, corrigé)." width="100%">
-
-<details>
-<summary>Le détail, constat par constat</summary>
 
 ### T1. La destination des paquets reçus n'était pas vérifiée
 
@@ -178,8 +174,6 @@ Ses constats :
   reste liée à la clé. Accepté.
 - **Documentation en retard sur le code** : mise à jour.
 
-</details>
-
 <a name="serveur"></a>
 <img src="sections/audit/s04.png" alt="04 Serveur" width="100%">
 
@@ -187,11 +181,6 @@ Le relecteur juge sains : l'absence d'injection SQL (requêtes paramétrées)
 et nftables (seulement des adresses et des entiers), les jetons (256 bits,
 stockés hachés), l'usage unique des clés d'inscription, le refus des points
 faibles de X25519, et la politique elle-même. Ses constats :
-
-<img src="schemas/audit/fiches-serveur.png" alt="S1 Retirer quelqu'un de l'équipe ne le coupait pas (haute, corrigé) ; S2 Une politique cassée bloquait toutes les révocations (moyenne, corrigé) ; S3 Un appareil pouvait prendre le nom « serveur » ou « maison » (moyenne, corrigé) ; S4 Une équipe illisible un instant effaçait tous les appareils personnels (moyenne, corrigé) ; S5 Les signatures du verrou ne s'annulaient jamais (basse à moyenne, corrigé) ; S6 Un pare-feu en échec laissait un état incohérent (basse, corrigé) ; S7 Les numéros et les adresses étaient réutilisés (basse, corrigé) ; S8 La preuve de possession n'était pas liée au justificatif (basse, corrigé) ; S9 Une clé d'inscription était perdue quand l'inscription échouait (basse, corrigé) ; DNS (durcissement, corrigé) ; État du réseau (durcissement, corrigé) ; Google (durcissement, corrigé) ; SQLite (durcissement, corrigé) ; Pare-feu (durcissement, corrigé) ; Nom et système (durcissement, corrigé) ; API (durcissement, corrigé)." width="100%">
-
-<details>
-<summary>Le détail, constat par constat</summary>
 
 ### S1. Retirer quelqu'un de l'équipe ne le coupait pas
 
@@ -298,19 +287,12 @@ faibles de X25519, et la politique elle-même. Ses constats :
 - **Nom et système** d'un appareil : bornés, et sans caractère de contrôle.
 - **API** : délais de lecture et d'écriture.
 
-</details>
-
 <a name="clients-et-deploiement"></a>
 <img src="sections/audit/s05.png" alt="05 Clients et déploiement" width="100%">
 
 Le relecteur juge sains : Nginx qui coupe les noms inconnus, le refus des
 redirections vers un autre domaine, oauth2-proxy tombé qui refuse au lieu de
 laisser passer, et l'absence de secret dans l'historique git. Ses constats :
-
-<img src="schemas/audit/fiches-clients-et-deploiement.png" alt="C1 La signature du verrou se faisait à l'aveugle (haute, corrigé) ; C2 La politique n'était pas signée : un serveur piraté pouvait ouvrir tous les ports (haute, corrigé) ; C3 Aucune révocation (moyenne, corrigé) ; C4 Un pair annoncé en IPv6 faisait planter tout client verrouillé (moyenne, corrigé) ; C5 Les en-têtes d'identité étaient falsifiables en direct (moyenne, corrigé) ; C6 Se réinscrire effaçait la clé du serveur et le verrou retenus (moyenne, corrigé) ; C7 Le client acceptait http:// en clair (moyenne, corrigé) ; C8 Le cookie de session partait vers les services publiés (moyenne, corrigé) ; C9 L'autorité du labo pouvait signer pour n'importe quelle adresse IP (moyenne, corrigé) ; Secrets lisibles par tous (durcissement, corrigé) ; Création de la clé du verrou (durcissement, corrigé) ; Conteneurs (durcissement, corrigé) ; Nginx (durcissement, corrigé) ; Secrets en argument de commande (durcissement, corrigé) ; Le script d'essai en production (durcissement, corrigé) ; Robustesse du client (durcissement, corrigé)." width="100%">
-
-<details>
-<summary>Le détail, constat par constat</summary>
 
 ### C1. La signature du verrou se faisait à l'aveugle
 
@@ -424,18 +406,11 @@ laisser passer, et l'absence de secret dans l'historique git. Ses constats :
   - texte du serveur nettoyé avant affichage ;
   - `ip` appelé par son chemin absolu.
 
-</details>
-
 <a name="revue-des-corrections"></a>
 <img src="sections/audit/s06.png" alt="06 Revue des corrections" width="100%">
 
 Une revue de sécurité a relu toutes les corrections, et un vérificateur
 indépendant a contrôlé chacun de ses constats.
-
-<img src="schemas/audit/fiches-revue-des-corrections.png" alt="R1 Une clé révoquée pouvait revenir sous une autre écriture (moyenne, corrigé) ; R2 La même faiblesse dans le cache anti-rejeu des inscriptions (basse, corrigé)." width="100%">
-
-<details>
-<summary>Le détail, constat par constat</summary>
 
 ### R1. Une clé révoquée pouvait revenir sous une autre écriture
 
@@ -459,15 +434,8 @@ indépendant a contrôlé chacun de ses constats.
   locale du serveur.
 - Corrigé quand même, par le même décodeur canonique.
 
-</details>
-
 <a name="trouve-en-corrigeant"></a>
 <img src="sections/audit/s07.png" alt="07 Trouvé en corrigeant" width="100%">
-
-<img src="schemas/audit/fiches-trouve-en-corrigeant.png" alt="Un client réinscrit gardait son ancienne adresse (en corrigeant, corrigé) ; La première version du cache anti-rejeu (en corrigeant, corrigé)." width="100%">
-
-<details>
-<summary>Le détail</summary>
 
 - **Un client réinscrit gardait son ancienne adresse** sur l'interface, en plus
   de la nouvelle, et continuait d'émettre avec. Les pairs rejetaient ces
@@ -479,8 +447,6 @@ indépendant a contrôlé chacun de ses constats.
   impossible. Corrigé : seules les preuves d'inscriptions réussies sont
   retenues.
 
-</details>
-
 <a name="deuxieme-audit"></a>
 <img src="sections/audit/s08.png" alt="08 Deuxième audit : les outils" width="100%">
 
@@ -491,14 +457,22 @@ corrigé ou écarté avec sa raison.
 
 ### Les outils
 
-<img src="schemas/audit/outils.png" alt="Les outils du deuxième audit : govulncheck, staticcheck, gosec, Semgrep, Trivy, Hadolint, ShellCheck, Gixy, et du fuzzing long." width="100%">
+- **govulncheck** (Go) : les vulnérabilités connues des dépendances, mais
+  seulement celles que le code appelle vraiment.
+- **staticcheck** : l'analyse statique de référence pour Go.
+- **gosec** : les motifs dangereux en Go (débordements, erreurs ignorées,
+  chemins, commandes).
+- **Semgrep** : 91 règles Go, Dockerfile et Nginx.
+- **Trivy** : les vulnérabilités de l'image Docker, sa configuration, et la
+  recherche de secrets oubliés.
+- **Hadolint** : les bonnes pratiques du Dockerfile.
+- **ShellCheck** : les pièges de Bash dans `scripts/sas.sh`.
+- **Gixy** : les erreurs de configuration de Nginx, sur la configuration
+  réellement chargée (`nginx -T`), pas sur les modèles.
+- **Fuzzing long** : huit cibles, trois minutes chacune, dont quatre
+  nouvelles (ci-dessous).
 
 ### Ce qu'ils ont trouvé, et ce qui a été corrigé
-
-<img src="schemas/audit/fiches-deuxieme.png" alt="O1 Une longueur sur deux octets pouvait déborder dans les certificats (outil, corrigé) ; O2 La même longueur dans les trames relayées (outil, corrigé) ; O3 Le numéro d'appareil était l'identifiant de la base, tronqué à quatre octets (outil, corrigé) ; O4 Des erreurs ignorées là où elles comptent (outil, corrigé) ; O5 Les redirections et les en-têtes reprenaient l'en-tête Host du client (outil, corrigé) ; O6 Une mise à jour de Nginx n'était jamais appliquée (outil, corrigé) ; O7 Le serveur par défaut négociait TLS sans réglages explicites (outil, corrigé) ; O8 Paquets Alpine non figés (outil, corrigé) ; O9 Le script (outil, corrigé) ; O10 Style (outil, corrigé)." width="100%">
-
-<details>
-<summary>Le détail des dix constats</summary>
 
 - **O1. Une longueur sur deux octets pouvait déborder dans les certificats**
   (gosec G115). Le message signé d'un certificat écrit chaque texte précédé
@@ -555,14 +529,7 @@ corrigé ou écarté avec sa raison.
 - **O10. Style** (staticcheck ST1005) : un message d'erreur commençait par
   une majuscule.
 
-</details>
-
 ### Écartés, avec leur raison
-
-<img src="schemas/audit/fiches-ecartes.png" alt="« Le conteneur tourne en root » (info, écarté) ; « Pas de HEALTHCHECK » (info, écarté) ; Chemins et commandes « variables » (info, écarté) ; Droits 0700 sur un dossier (info, écarté) ; Conversions d'heures en entiers non signés (info, écarté) ; Erreurs ignorées restantes (info, écarté) ; worker_rlimit_nofile (info, écarté) ; govulncheck (info, écarté)." width="100%">
-
-<details>
-<summary>Le détail, et pourquoi</summary>
 
 - **« Le conteneur tourne en root »** (Semgrep, Trivy DS-0002). Vérifié :
   sous un autre utilisateur, les capacités données par compose ne sont pas
@@ -588,14 +555,7 @@ corrigé ou écarté avec sa raison.
   paquet que CyberSas n'importe pas. Trivy ne trouve aucune vulnérabilité
   dans l'image, ni aucun secret dans le dépôt.
 
-</details>
-
 ### Le fuzzing, poussé plus loin
-
-<img src="schemas/audit/fiches-fuzzing.png" alt="Le fuzzing, en millions d'entrées par cible : lecture d'un paquet IPv4 20.8, lecture d'une trame relayée 18.9, fenêtre anti-rejeu 20.6, point d'entrée réseau du moteur 20.7, message 1 de la poignée de main, contre flynn/noise 6.2, message 2, contre flynn/noise 1, décodeur base64 38.6, politique 21.2. Trois minutes par cible, <b>148 millions d’entrées au total, sans une panique ni un désaccord</b>." width="100%">
-
-<details>
-<summary>Les quatre nouvelles cibles</summary>
 
 Quatre nouvelles cibles s'ajoutent aux quatre du moteur :
 
@@ -610,7 +570,18 @@ Quatre nouvelles cibles s'ajoutent aux quatre du moteur :
   jamais tomber le serveur, et n'ouvre jamais de flux vers une adresse qui
   n'est pas un appareil.
 
-</details>
+Résultat, trois minutes par cible, **148 millions d'entrées au total, sans
+une panique ni un désaccord** :
+
+- lecture d'un paquet IPv4 : 20,8 millions ;
+- lecture d'une trame relayée : 18,9 millions ;
+- fenêtre anti-rejeu : 20,6 millions ;
+- point d'entrée réseau du moteur : 20,7 millions ;
+- message 1 de la poignée de main, contre flynn/noise : 6,2 millions ;
+- message 2, contre flynn/noise : 1,0 million (chaque essai refait une
+  poignée de main complète) ;
+- décodeur base64 : 38,6 millions ;
+- politique : 21,2 millions.
 
 <a name="troisieme-audit"></a>
 <img src="sections/audit/s09.png" alt="09 Troisième audit : l'appli" width="100%">
@@ -622,11 +593,6 @@ Deux jours après les deux premiers, l'appli Android a pris le vrai tunnel, puis
 - la frontière entre l'appli et le moteur : ce que le téléphone signe, le lien d'invitation, les révocations.
 
 **Résultat** : 23 constats, dont 1 haut et 5 moyens. 22 sont corrigés, un est accepté et expliqué. Les tests Go passent de 73 à 79, plus 8 cibles de fuzzing, sous le détecteur d’accès concurrents.
-
-<img src="schemas/audit/fiches-troisieme.png" alt="A1 Révoquer depuis l'appli signait une liste que le serveur avait choisie (haute, corrigé) ; A2 L'admin signait des champs qu'il n'avait jamais vus (moyenne, corrigé) ; A3 Un appareil jamais signé avait les pouvoirs d'admin (moyenne, corrigé) ; A4 La clé de l'appareil partait dans les sauvegardes (moyenne, corrigé) ; A5 L'empreinte n'était pas liée à la signature (moyenne, corrigé) ; A6 Un lien d'invitation forgé pouvait router tout l'Internet du téléphone (moyenne à basse, corrigé) ; A7 Écriture de revocations.json (basse, corrigé) ; A8 Un crash sous Android 9 et 10 (basse, corrigé) ; A9 Le verrou de l'appli se contournait en reculant l'horloge (basse, corrigé) ; A10 L'aperçu des applis récentes montrait l'appli déverrouillée (basse, corrigé) ; A11 Le clavier atteignait les boutons sous le verrou (basse, corrigé) ; A12 La clé du verrou restait dans le presse-papiers (basse, corrigé) ; A13 Retirer et révoquer ne montraient que le nom (basse, corrigé) ; A14 Quitter pendant une synchronisation (basse, corrigé) ; A15 Les invitations (basse, corrigé) ; A16 Le lien d'invitation (basse, corrigé) ; A17 Nginx coupait à 16 Ko (basse, corrigé) ; La clé du verrou en mémoire (info, corrigé) ; Une publication sans clé de signature (info, corrigé) ; Un second démarrage du tunnel (info, corrigé) ; A18 La clé privée de l'appareil est en clair dans son dossier (basse, accepté)." width="100%">
-
-<details>
-<summary>Le détail des 23 constats</summary>
 
 ### A1. Révoquer depuis l'appli signait une liste que le serveur avait choisie
 
@@ -692,19 +658,12 @@ Deux jours après les deux premiers, l'appli Android a pris le vrai tunnel, puis
 
 - **A18. La clé privée de l'appareil est en clair dans son dossier.** Elle n'est enveloppée par aucune clé de la puce. Elle reste protégée par le bac à sable d'Android, le chiffrement du stockage et des droits réservés à l'appli, et elle ne part plus dans aucune sauvegarde (A4). L'envelopper demande de changer le format de stockage partagé avec le client Linux : c'est noté pour plus tard.
 
-</details>
-
 ### Vérifié et trouvé sain
 
 Le service VPN n'est joignable que par le système ; le lien `cybersas://` n'est traité que sur l'écran de connexion et demande un appui ; les canaux entre Flutter et Kotlin ne sont joignables que depuis l'appli ; aucun journal ne contient de clé, de jeton ni de graine ; le client refuse `http://`, ne suit aucune redirection et ne fait confiance qu'aux racines du système ; l'empreinte affichée et la clé signée viennent de la même chaîne, décodée de façon canonique ; les invitations sont consommées une seule fois, de façon atomique ; les routes d'admin refusent un non-admin (403) et relisent l'équipe à chaque requête.
 
 <a name="ce-qui-reste"></a>
 <img src="sections/audit/s10.png" alt="10 Ce qui reste" width="100%">
-
-<img src="schemas/audit/fiches-ce-qui-reste.png" alt="La clé privée de chaque appareil (à faire, aucun) ; La clé du verrou n'a pas de secours (à faire, aucun) ; Aucun audit humain (à faire, aucun) ; Les métadonnées (à faire, aucun) ; Les pages publiées par Nginx (à faire, aucun) ; Le premier contact (à faire, aucun) ; Google (à faire, aucun) ; La limite de débit de Nginx (à faire, aucun) ; L'adresse de retour après connexion web (à faire, aucun) ; Pas de liaison directe (à faire, aucun)." width="100%">
-
-<details>
-<summary>Le détail</summary>
 
 - **La clé privée de chaque appareil** n'est pas enveloppée par la puce du téléphone (constat A18) : protégée par Android, exclue des sauvegardes.
 - **La clé du verrou n'a pas de secours** : perdre le téléphone de l'admin sans copie hors ligne gèle toute signature.
@@ -724,8 +683,6 @@ Le service VPN n'est joignable que par le système ; le lien `cybersas://` n'est
   conséquence de sécurité, puisque la liste des domaines permis tient.
 - **Pas de liaison directe** entre appareils, et **IPv4 seulement** dans le
   tunnel.
-
-</details>
 
 <br>
 

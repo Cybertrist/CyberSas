@@ -32,7 +32,7 @@ Sur le Fold déplié, un rail à gauche. Toucher un appareil fait glisser la lis
 
 <img src="docs/schemas/captures-deplie.png" alt="Quatre écrans sur le Fold déplié. L'accueil : le tunnel à gauche, l'appareil et le réseau à droite. La carte du réseau en grand à gauche avec les demandes, les machines à droite. Toucher un appareil fait glisser la liste à gauche et ouvre son détail à droite. Les réglages en deux colonnes." width="100%">
 
-L'appli se construit dans [`mobile/`](mobile). Elle embarque le moteur Go du tunnel ([`pont/`](pont)) et passe par le service VPN d'Android. Les captures ci-dessus viennent de son mode démo, sur un réseau d'exemple.
+L'appli vit dans le dossier `mobile/`. Elle embarque le moteur Go du tunnel (`pont/`) et passe par le service VPN d'Android. Les captures ci-dessus viennent de son mode démo, sur un réseau d'exemple.
 
 <img src="docs/sections/s03.png" alt="03 Comment ça marche" width="100%">
 
@@ -44,7 +44,7 @@ L'appli se construit dans [`mobile/`](mobile). Elle embarque le moteur Go du tun
 4. L'admin voit la demande sur son téléphone, compare l'empreinte avec celle du nouvel appareil, et signe son certificat avec son doigt.
 5. L'appareil ouvre une session avec le serveur, puis une session de bout en bout avec chaque appareil qu'il a le droit de joindre, à la demande. À partir de là, l'API ne sert plus à rien : le tunnel ne se fie qu'aux clés.
 
-Tout le protocole, octet par octet et en schémas, est dans [`docs/protocole.md`](docs/protocole.md).
+Tout le protocole, octet par octet et en schémas, est dans [le document du protocole](docs/protocole.md).
 
 <img src="docs/sections/s04.png" alt="04 Rejoindre le réseau" width="100%">
 
@@ -56,11 +56,11 @@ Une machine sans écran, comme le serveur de la maison, s'inscrit avec le client
 
 <img src="docs/schemas/verrou.svg" alt="Un serveur piraté glisse un intrus dans le réseau : le téléphone fold8-tristan vérifie le certificat, ne trouve pas de signature du verrou, et le refuse. L'ordinateur laptop-lea, signé par le verrou, est accepté." width="100%">
 
-Le verrou, sa chaîne de confiance et le coffre du téléphone sont décrits dans [`docs/verrou.md`](docs/verrou.md).
+Le verrou, sa chaîne de confiance et le coffre du téléphone ont [leur document](docs/verrou.md).
 
 <img src="docs/sections/s05.png" alt="05 Qui peut aller où" width="100%">
 
-La politique est dans [`politique/politique.json`](politique/politique.json), signée par l'admin. Tout est fermé par défaut.
+La politique vit dans `politique/politique.json`, signée par l'admin. Tout est fermé par défaut.
 
 <img src="docs/schemas/regles.png" alt="Six règles. Les admins atteignent tout le réseau. Chacun atteint ses propres appareils, jamais ceux des autres. L'équipe atteint les services web de la maison, pas son SSH. Seul le serveur atteint le port publié de la maison. La maison ne peut ouvrir de connexion vers personne. La politique est signée par la clé du verrou : le serveur ne peut pas la changer sans que ça se voie." width="100%">
 
@@ -129,17 +129,21 @@ CyberSas a été relu trois fois. D'abord par trois relecteurs indépendants et 
 
 Pour aller plus loin, quatre documents, dessinés comme ce README :
 
-- [**Le protocole**](docs/protocole.md) : les deux couches, la poignée de main Noise IK, le format des messages à l'échelle, les sessions, le filtre, l'inondation.
-- [**Le verrou**](docs/verrou.md) : la chaîne de confiance, le coffre du téléphone, signer et révoquer, pas à pas.
-- [**Le modèle de menace**](docs/menaces.md) : ce qui est exposé, qui peut quoi, le serveur piraté, le téléphone de l'admin volé.
-- [**L'audit**](docs/audit.md) : les trois relectures, les 79 constats et ce qui a été fait de chacun.
+<div align="center">
+
+<a href="docs/protocole.md"><img src="docs/nav/protocole.png" alt="Le protocole : les deux couches, Noise IK, les messages à l’échelle, le filtre." width="49%"></a>
+<a href="docs/verrou.md"><img src="docs/nav/verrou.png" alt="Le verrou : la chaîne de confiance, le coffre du téléphone, signer et révoquer." width="49%"></a>
+<a href="docs/menaces.md"><img src="docs/nav/menaces.png" alt="Le modèle de menace : ce qui est exposé, le serveur piraté, le téléphone volé." width="49%"></a>
+<a href="docs/audit.md"><img src="docs/nav/audit.png" alt="L’audit de sécurité : trois relectures, 79 constats." width="49%"></a>
+
+</div>
 
 <a name="la-feuille-de-route"></a>
 <img src="docs/sections/s10.png" alt="10 La feuille de route" width="100%">
 
 <img src="docs/schemas/feuille.png" alt="La feuille de route. Fait : le tunnel, le serveur et le verrou, 79 tests Go, 8 cibles de fuzzing et 18 vérifications de bout en bout ; trois audits ; l'appli Android avec le vrai tunnel ; l'admin depuis le téléphone, signer, refuser, inviter, renommer, retirer, révoquer. En cours : la connexion Google dans l'appli. À venir : l'équipe depuis l'appli ; le serveur en ligne, d'abord à la maison puis sur un VPS ; un secours pour la clé du verrou. À discuter : l'appli Windows ; un site vitrine et une console web qui ne peut pas signer." width="100%">
 
-Les figures de ce README sont dessinées par les scripts de [`docs/tools`](docs/tools) : aucune ne sort d'un logiciel de dessin, et chaque animation est vérifiée image par image avant d'être publiée.
+Les figures de ce README sont dessinées par les scripts de `docs/tools` : aucune ne sort d'un logiciel de dessin, et chaque animation est vérifiée image par image avant d'être publiée.
 
 <br>
 
